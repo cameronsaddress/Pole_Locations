@@ -1,0 +1,2 @@
+metrics/precision(B),metrics/recall(B),metrics/mAP50(B),metrics/mAP50-95(B),fitness,confidence_threshold,iou_threshold
+0.0,0.0,0.0,0.0,0.0,0.5,0.55

@@ -1,0 +1,47 @@
+# Geospatial Libraries
+geopandas>=0.14.0
+rasterio>=1.3.9
+gdal>=3.8.0
+shapely>=2.0.2
+fiona>=1.9.5
+pyproj>=3.6.1
+
+# Data Processing
+pandas>=2.1.0
+numpy>=1.24.0
+scipy>=1.11.0
+
+# AI/ML Libraries
+torch>=2.1.0
+torchvision>=0.16.0
+ultralytics>=8.0.0
+
+# OCR
+pytesseract>=0.3.10
+
+# Visualization & Dashboard
+streamlit>=1.28.0
+folium>=0.15.0
+streamlit-folium>=0.15.0
+plotly>=5.17.0
+matplotlib>=3.8.0
+
+# Imagery & Cloud
+boto3>=1.29.0
+earthengine-api>=0.1.380
+
+# Utilities
+pillow>=10.1.0
+opencv-python>=4.8.1
+tqdm>=4.66.0
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Export & Reporting
+openpyxl>=3.1.2
+xlsxwriter>=3.1.9
+osmnx==1.4.0

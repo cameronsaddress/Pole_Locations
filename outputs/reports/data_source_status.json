@@ -1,0 +1,218 @@
+{
+  "verizon_gis": {
+    "name": "Verizon Enterprise GIS",
+    "category": "Authoritative Inventory",
+    "description": "Internal Verizon pole inventory with inspection metadata, ownership, attachments.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/raw/verizon/pole_inventory.geojson",
+      "/Users/cameronanderson/PoleLocations/data/raw/verizon/inspection_ledger.csv"
+    ],
+    "loader_hint": "Create secure connector in src/ingestion/verizon_loader.py to pull nightly dumps.",
+    "documentation": "Coordinate with Verizon GIS ops for SFTP/API credentials; avoid storing secrets in repo.",
+    "required": true,
+    "notes": "Once available, merge with OSM feed inside run_pilot._load_historical_poles()."
+  },
+  "state_permitting": {
+    "name": "State & County Utility Permits",
+    "category": "Authoritative Inventory",
+    "description": "PennDOT/municipal permit exports covering pole installs, relocations, and retirements.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/raw/pennsylvania/utility_permits.csv",
+      "/Users/cameronanderson/PoleLocations/data/raw/municipal/asset_registry.geojson"
+    ],
+    "loader_hint": "Add parsers under src/ingestion/state_permits.py to normalise schemas.",
+    "documentation": "Check PennDOT OpenData, city data portals; prioritise CSV/GeoJSON dumps.",
+    "required": false,
+    "notes": null
+  },
+  "commercial_aerial": {
+    "name": "Commercial Aerial Imagery",
+    "category": "Imagery",
+    "description": "Leaf-on/off 30\u202fcm imagery tiles (Maxar, Planet, or state orthos) covering Harrisburg AOI.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/imagery/maxar_tiles",
+      "/Users/cameronanderson/PoleLocations/data/imagery/planet_tiles"
+    ],
+    "loader_hint": "Extend src/detection/tile_catalog.py to index new raster directories before YOLO runs.",
+    "documentation": "Capture acquisition metadata (timestamp, sun angle) in tileset_manifest.json.",
+    "required": false,
+    "notes": null
+  },
+  "street_level": {
+    "name": "Street-Level Imagery",
+    "category": "Street Imagery",
+    "description": "Mapillary / Kinetik panoramas for corridor QA and hard-negative mining.",
+    "exists": true,
+    "missing_paths": [],
+    "loader_hint": "Use src/utils/harvest_mapillary.py then extend ingestion/street_level.py for labeling queue.",
+    "documentation": "Requires MAPILLARY_TOKEN or similar API keys set via environment variables.",
+    "required": false,
+    "notes": null
+  },
+  "pamap_orthophotos": {
+    "name": "PAMAP Leaf-Off Orthophotos",
+    "category": "Imagery",
+    "description": "Pennsylvania leaf-off aerial imagery (6\u201312 inch) for high-resolution detection reruns.",
+    "exists": true,
+    "missing_paths": [],
+    "loader_hint": "Use state download scripts under src/ingestion/pamap_downloader.py to sync GeoTIFFs.",
+    "documentation": "Available via PA Spatial Data Access (PASDA); ensure CRS metadata stored alongside tiles.",
+    "required": false,
+    "notes": null
+  },
+  "naip_historical": {
+    "name": "NAIP Historical Imagery",
+    "category": "Imagery",
+    "description": "Prior-year NAIP tiles for multi-season training and change detection.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/imagery/naip_historical"
+    ],
+    "loader_hint": "Organise per-year subfolders; extend detection tile catalog to use seasonal variants.",
+    "documentation": "Download from USDA NRCS Geospatial Data Gateway (public domain).",
+    "required": false,
+    "notes": null
+  },
+  "usgs_3dep_extended": {
+    "name": "USGS 3DEP Point Clouds",
+    "category": "Elevation",
+    "description": "Expanded Harrisburg 3DEP LAS/LAZ tiles for pole height derivation.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/processed/lidar/pointclouds",
+      "/Users/cameronanderson/PoleLocations/data/processed/lidar/dsm_tiles"
+    ],
+    "loader_hint": "Run src/ingestion/lidar_pipeline.py to convert point clouds to DSM/DTM rasters.",
+    "documentation": "Fetch from USGS 3DEP AWS (public domain).",
+    "required": false,
+    "notes": null
+  },
+  "nlcd_landcover": {
+    "name": "National Land Cover Dataset",
+    "category": "Context",
+    "description": "Land-cover raster to identify forest, wetlands, and built-up areas for contextual scoring.",
+    "exists": true,
+    "missing_paths": [],
+    "loader_hint": "Download via USGS MRLC; store reprojected raster matching AOI.",
+    "documentation": "Public domain; metadata required for provenance.",
+    "required": false,
+    "notes": null
+  },
+  "nhd_hydrography": {
+    "name": "National Hydrography Dataset",
+    "category": "Context",
+    "description": "High-resolution hydro polygons/lines to mask rivers and lakes.",
+    "exists": true,
+    "missing_paths": [],
+    "loader_hint": "Use src/ingestion/nhd_ingest.py to subset Harrisburg HUCs and simplify geometries.",
+    "documentation": "Freely available via USGS NHD download services.",
+    "required": false,
+    "notes": null
+  },
+  "tiger_roads": {
+    "name": "TIGER + PennDOT Roads",
+    "category": "Context",
+    "description": "Merged TIGER/PennDOT road centerlines for ROW proximity checks.",
+    "exists": true,
+    "missing_paths": [],
+    "loader_hint": "Combine Census TIGER shapefiles with PennDOT centerlines under src/ingestion/road_loader.py.",
+    "documentation": "Census TIGER (public domain) plus PennDOT open data license.",
+    "required": false,
+    "notes": null
+  },
+  "fcc_asr": {
+    "name": "FCC Antenna Structure Registration",
+    "category": "Infrastructure",
+    "description": "Registered towers to help distinguish poles from tall structures.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/raw/fcc/antenna_structures.csv"
+    ],
+    "loader_hint": "Download weekly ASR CSV and parse via src/ingestion/fcc_asr_loader.py.",
+    "documentation": "FCC ASR public download (CSV).",
+    "required": false,
+    "notes": null
+  },
+  "hifld_energy": {
+    "name": "HIFLD Energy Infrastructure",
+    "category": "Infrastructure",
+    "description": "Highway Infrastructure Foundation Level Data \u2013 energy asset points/lines.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/raw/hifld/energy_assets.geojson"
+    ],
+    "loader_hint": "Use DHS/HIFLD open datasets to capture substations, transmission lines, etc.",
+    "documentation": "HIFLD open data license; review usage terms.",
+    "required": false,
+    "notes": null
+  },
+  "municipal_open_data": {
+    "name": "Municipal Harrisburg Assets",
+    "category": "Authoritative Inventory",
+    "description": "City/County asset registries or permit logs to corroborate OSM poles.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/raw/municipal/harrisburg_assets.geojson"
+    ],
+    "loader_hint": "Scrape CS/Harrisburg open data portal via src/ingestion/municipal_loader.py.",
+    "documentation": "Check municipality-specific licensing terms before redistribution.",
+    "required": false,
+    "notes": null
+  },
+  "mapillary_refresh": {
+    "name": "Mapillary Metadata Refresh",
+    "category": "Street Imagery",
+    "description": "Quarterly dumps of Mapillary metadata for corridors, enabling labeling campaigns.",
+    "exists": true,
+    "missing_paths": [],
+    "loader_hint": "Schedule harvest_mapillary.py with date filters; store incremental snapshots.",
+    "documentation": "Requires MAPILLARY_TOKEN with proper scopes.",
+    "required": false,
+    "notes": null
+  },
+  "lidar_pointcloud": {
+    "name": "USGS / Enterprise LiDAR",
+    "category": "Elevation",
+    "description": "Classified point clouds or DSM rasters for pole height estimation and vegetation clearance.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/processed/lidar/pointclouds",
+      "/Users/cameronanderson/PoleLocations/data/processed/lidar/dsm_tiles"
+    ],
+    "loader_hint": "Add processing routines to src/ingestion/lidar_pipeline.py to derive pole height rasters.",
+    "documentation": "USGS 3DEP available via AWS Open Data; enterprise mobile LiDAR via secure share.",
+    "required": false,
+    "notes": null
+  },
+  "vegetation_row": {
+    "name": "ROW & Vegetation Layers",
+    "category": "Context",
+    "description": "Utility easements, land-cover, weather/outage overlays to refine contextual scores.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/processed/context/utility_row.geojson",
+      "/Users/cameronanderson/PoleLocations/data/processed/context/land_cover.tif"
+    ],
+    "loader_hint": "Augment src/fusion/context_filters.py to consume new rasters/vectors.",
+    "documentation": null,
+    "required": false,
+    "notes": null
+  },
+  "compliance_filings": {
+    "name": "FCC Compliance Filings",
+    "category": "Compliance",
+    "description": "Pole attachment reports, outage logs, or third-party audit results.",
+    "exists": false,
+    "missing_paths": [
+      "/Users/cameronanderson/PoleLocations/data/raw/fcc/pole_attachment.csv",
+      "/Users/cameronanderson/PoleLocations/data/raw/compliance/outage_logs.csv"
+    ],
+    "loader_hint": "Parse filings under src/ingestion/compliance_loader.py and merge recency metrics.",
+    "documentation": null,
+    "required": false,
+    "notes": null
+  }
+}
