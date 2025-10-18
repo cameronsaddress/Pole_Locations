@@ -1,5 +1,7 @@
 # PoleLocations - AI-Driven Utility Pole Verification System
 
+> **Source Repository:** https://github.com/cameronsaddress/PoleLocations
+
 ## Project Overview
 
 Verizon maintains over one million utility poles on the East Coast that require location verification (x-y coordinates) every 5 years per FCC guidelines. This system automates the verification process using AI, Python, aerial/satellite imagery, and historical technician reports to eliminate known good pole locations and surface questionable poles for human review.
