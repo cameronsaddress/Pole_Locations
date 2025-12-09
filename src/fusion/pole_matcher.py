@@ -6,10 +6,11 @@ import geopandas as gpd
 import numpy as np
 from scipy.spatial import KDTree
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import logging
 from pathlib import Path
 import sys
+from pyproj import Transformer, CRS
 
 sys.path.append(str(Path(__file__).parent.parent))
 from config import (
@@ -115,29 +116,50 @@ class PoleMatcher:
         """
         logger.info(f"Matching {len(detections_df)} detections to {len(historical_gdf)} historical records")
 
-        # Extract coordinates
-        historical_coords = np.array(list(zip(
-            historical_gdf.geometry.y,  # lat
-            historical_gdf.geometry.x   # lon
-        )))
+        if historical_gdf.empty or detections_df.empty:
+            logger.info("No matches computed because one of the inputs is empty.")
+            return pd.DataFrame()
 
-        detection_coords = np.array(list(zip(
-            detections_df['lat'],
-            detections_df['lon']
-        )))
+        hist_gdf = historical_gdf.reset_index(drop=True).copy()
+        if hist_gdf.crs is None:
+            hist_gdf.set_crs("EPSG:4326", inplace=True)
+        elif hist_gdf.crs.to_string() != "EPSG:4326":
+            hist_gdf = hist_gdf.to_crs("EPSG:4326")
 
-        # Build KDTree for fast nearest-neighbor search
-        # Convert degrees to approximate meters (at mid-latitudes)
-        # 1 degree lat ≈ 111km, 1 degree lon ≈ 111km * cos(lat)
-        # For simplicity, using 111km per degree
-        historical_coords_scaled = historical_coords * 111000  # Convert to meters
-        detection_coords_scaled = detection_coords * 111000
+        detections_clean = detections_df.copy()
+        detections_clean = detections_clean.dropna(subset=['lat', 'lon']).reset_index(drop=True)
 
-        tree = KDTree(historical_coords_scaled)
+        if detections_clean.empty:
+            logger.warning("All detections missing coordinates after cleaning; returning empty match set.")
+            return pd.DataFrame()
+
+        try:
+            metric_crs = hist_gdf.estimate_utm_crs()
+        except Exception:
+            metric_crs = None
+
+        if metric_crs is None:
+            metric_crs = CRS.from_epsg(3857)
+
+        transformer = Transformer.from_crs("EPSG:4326", metric_crs, always_xy=True)
+
+        hist_x, hist_y = transformer.transform(
+            hist_gdf.geometry.x.to_numpy(),
+            hist_gdf.geometry.y.to_numpy()
+        )
+        det_x, det_y = transformer.transform(
+            detections_clean['lon'].to_numpy(),
+            detections_clean['lat'].to_numpy()
+        )
+
+        historical_coords = np.column_stack([hist_x, hist_y])
+        detection_coords = np.column_stack([det_x, det_y])
+
+        tree = KDTree(historical_coords)
 
         # Query nearest neighbor for each detection
         distances, indices = tree.query(
-            detection_coords_scaled,
+            detection_coords,
             k=1,
             distance_upper_bound=self.match_threshold
         )
@@ -146,10 +168,11 @@ class PoleMatcher:
         matches = []
 
         for i, (dist, idx) in enumerate(zip(distances, indices)):
-            detection = detections_df.iloc[i]
+            detection = detections_clean.iloc[i]
 
-            if dist <= self.match_threshold:  # Valid match found
-                historical_record = historical_gdf.iloc[idx]
+            if dist != np.inf and idx < len(hist_gdf):  # Valid match found
+                historical_record = hist_gdf.iloc[int(idx)]
+                match_distance_m = float(dist)
 
                 # Calculate recency weight
                 recency_weight = self.calculate_recency_weight(
@@ -160,7 +183,7 @@ class PoleMatcher:
                 combined_conf = self.calculate_confidence_score(
                     imagery_conf=detection.get('confidence', 0.5),
                     recency_weight=recency_weight,
-                    distance_meters=dist
+                    distance_meters=match_distance_m
                 )
 
                 match = {
@@ -179,7 +202,7 @@ class PoleMatcher:
                     'inspection_date': historical_record.get('inspection_date', ''),
 
                     # Match quality
-                    'match_distance_m': dist,
+                    'match_distance_m': match_distance_m,
                     'recency_weight': recency_weight,
                     'combined_confidence': combined_conf,
 
@@ -271,7 +294,11 @@ class PoleMatcher:
             'new_missing': new_missing
         }
 
-    def export_results(self, classifications: Dict[str, pd.DataFrame]):
+    def export_results(
+        self,
+        classifications: Dict[str, pd.DataFrame],
+        extra_metrics: Optional[Dict[str, float]] = None
+    ):
         """
         Export classification results to CSV files
 
@@ -294,6 +321,9 @@ class PoleMatcher:
             'automation_rate': len(classifications['verified_good']) / sum(len(df) for df in classifications.values()) * 100,
             'review_queue_rate': len(classifications['in_question']) / sum(len(df) for df in classifications.values()) * 100
         }
+
+        if extra_metrics:
+            summary.update(extra_metrics)
 
         summary_path = EXPORTS_OUTPUT_DIR / 'summary_metrics.json'
         import json

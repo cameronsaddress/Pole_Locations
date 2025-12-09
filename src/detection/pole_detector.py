@@ -5,14 +5,33 @@ import logging
 import json
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+import sys
+import types
 import numpy as np
 import pandas as pd
-from ultralytics import YOLO
-import sys
+import torch
 import rasterio
 from rasterio.windows import Window
 import rasterio.errors
 
+if "cv2.dnn" not in sys.modules:
+    cv2_dnn = types.ModuleType("cv2.dnn")
+    cv2_dnn.DictValue = int  # type: ignore[attr-defined]
+    sys.modules["cv2.dnn"] = cv2_dnn
+
+import cv2
+
+if not hasattr(cv2, "imshow"):
+    # Ultralytics expects GUI-centric OpenCV functions; provide harmless stubs for headless builds.
+    def _headless_imshow(*_args, **_kwargs):
+        logging.getLogger(__name__).debug("cv2.imshow called in headless mode; ignoring.")
+
+    cv2.imshow = _headless_imshow  # type: ignore[attr-defined]
+    cv2.namedWindow = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
+    cv2.waitKey = lambda *_args, **_kwargs: -1  # type: ignore[attr-defined]
+    cv2.destroyAllWindows = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
+
+from ultralytics import YOLO
 sys.path.append(str(Path(__file__).parent.parent))
 from config import (  # type: ignore
     MODEL_TYPE,
@@ -22,6 +41,10 @@ from config import (  # type: ignore
     TRAINING_DATA_DIR,
     MODEL_INPUT_SIZE,
     THRESHOLD_EXPORT_PATH,
+    MODELS_DIR,
+    DETECTION_LAT_OFFSET_DEG,
+    DETECTION_LON_OFFSET_DEG,
+    OUTPUTS_DIR,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +60,8 @@ class PoleDetector:
         self,
         model_path: Optional[Path] = None,
         confidence: Optional[float] = None,
-        iou: Optional[float] = None
+        iou: Optional[float] = None,
+        augment: bool = True
     ):
         """
         Initialize pole detector
@@ -45,6 +69,7 @@ class PoleDetector:
         Args:
             model_path: Path to trained model weights (uses pretrained if None)
             confidence: Minimum confidence threshold for detections
+            augment: Enable Test Time Augmentation (TTA) for higher accuracy
         """
         overrides = self._load_threshold_overrides()
 
@@ -58,19 +83,51 @@ class PoleDetector:
             if iou is not None
             else overrides.get("iou", IOU_THRESHOLD)
         )
+        self.lat_offset_deg = overrides.get("lat_offset_deg", DETECTION_LAT_OFFSET_DEG)
+        self.lon_offset_deg = overrides.get("lon_offset_deg", DETECTION_LON_OFFSET_DEG)
+        self.augment = augment
 
-        if model_path and model_path.exists():
-            logger.info(f"Loading custom model from {model_path}")
-            self.model = YOLO(str(model_path))
+        resolved_model_path = self._resolve_model_path(model_path)
+
+        if resolved_model_path is not None:
+            logger.info("Loading custom model from %s", resolved_model_path)
+            self.model = YOLO(str(resolved_model_path))
         else:
-            logger.info(f"Loading pretrained {MODEL_TYPE} model")
+            logger.info("Loading pretrained %s model", MODEL_TYPE)
             self.model = YOLO(f'{MODEL_TYPE}.pt')
 
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            try:
+                device_name = torch.cuda.get_device_name(0)
+            except Exception:  # pragma: no cover - defensive
+                device_name = "CUDA device"
+            logger.info("Using GPU acceleration on %s", device_name)
+        else:
+            logger.info("CUDA not available; running detector on CPU.")
+
+        try:
+            self.model.to(self.device)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to move model to %s (%s). Falling back to CPU.",
+                self.device,
+                exc,
+            )
+            self.device = "cpu"
+
         logger.info(
-            "Model loaded. Confidence threshold: %.3f | IoU threshold: %.3f",
+            "Model loaded. Confidence threshold: %.3f | IoU threshold: %.3f | TTA: %s",
             self.confidence,
-            self.iou
+            self.iou,
+            self.augment
         )
+        if self.lat_offset_deg or self.lon_offset_deg:
+            logger.info(
+                "Geospatial calibration offsets applied: Δlat=%.6f°, Δlon=%.6f°",
+                self.lat_offset_deg,
+                self.lon_offset_deg,
+            )
 
     def train(self, data_yaml: Path, epochs: int = 100, batch_size: int = 16,
               img_size: int = 640, patience: int = 20) -> Path:
@@ -107,7 +164,8 @@ class PoleDetector:
             project=str(CHECKPOINTS_DIR),
             name='pole_detection',
             pretrained=True,
-            verbose=True
+            verbose=True,
+            device=self.device
         )
 
         # Get best weights path
@@ -134,7 +192,9 @@ class PoleDetector:
             source=str(image_path),
             conf=self.confidence,
             iou=self.iou,
-            verbose=False
+            augment=self.augment,
+            verbose=False,
+            device=self.device
         )
 
         detections = []
@@ -204,6 +264,36 @@ class PoleDetector:
             )
             return {}
 
+    @staticmethod
+    def _resolve_model_path(model_path: Optional[Path]) -> Optional[Path]:
+        """
+        Determine which model weights to load, preferring fine-tuned checkpoints when available.
+
+        Args:
+            model_path: Explicit path provided by the caller.
+
+        Returns:
+            Path to weights file or None if we should fall back to the base Ultralytics model.
+        """
+        candidates: List[Path] = []
+
+        if model_path is not None:
+            candidates.append(Path(model_path))
+
+        candidates.extend([
+            MODELS_DIR / "yolov8l_v1" / "weights" / "best.pt",
+            MODELS_DIR / "pole_detector_v7" / "weights" / "best.pt",
+            MODELS_DIR / "pole_detector_v6" / "weights" / "best.pt",
+            MODELS_DIR / "pole_detector_v4" / "weights" / "best.pt",
+            MODELS_DIR / "pole_detector_real.pt",
+        ])
+
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate
+
+        return None
+
     def detect_batch(self, image_paths: List[Path], batch_size: int = 8) -> Dict[str, List[Dict]]:
         """
         Detect poles in multiple images (batched for efficiency)
@@ -227,7 +317,9 @@ class PoleDetector:
                 source=[str(p) for p in batch],
                 conf=self.confidence,
                 iou=self.iou,
+                augment=self.augment,
                 verbose=False,
+                device=self.device,
                 stream=True
             )
 
@@ -284,6 +376,8 @@ class PoleDetector:
             pandas.DataFrame with metrics for each (confidence, IoU) pair.
         """
         results = []
+        eval_runs_dir = OUTPUTS_DIR / "threshold_eval"
+        eval_runs_dir.mkdir(parents=True, exist_ok=True)
 
         for conf in confidence_values:
             for iou in iou_values:
@@ -300,7 +394,11 @@ class PoleDetector:
                         iou=iou,
                         batch=batch_size,
                         imgsz=imgsz,
-                        verbose=False
+                        verbose=False,
+                        device=self.device,
+                        project=str(eval_runs_dir),
+                        name=f"conf_{conf:.3f}_iou_{iou:.3f}",
+                        exist_ok=True,
                     )
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.error(
@@ -353,6 +451,9 @@ class PoleDetector:
         if crs != 'EPSG:4326':
             lon, lat = warp_transform(crs, 'EPSG:4326', [lon], [lat])
             lon, lat = lon[0], lat[0]
+
+        lat += self.lat_offset_deg
+        lon += self.lon_offset_deg
 
         return lat, lon
 
@@ -421,7 +522,9 @@ class PoleDetector:
                             source=image,
                             conf=self.confidence,
                             iou=self.iou,
-                            verbose=False
+                            augment=self.augment,
+                            verbose=False,
+                            device=self.device
                         )
 
                         for result in results:

@@ -5,15 +5,20 @@ Runs the full verification workflow using only real datasets
 import sys
 from pathlib import Path
 from datetime import datetime
+from typing import List, Tuple, Optional
 
 sys.path.append(str(Path(__file__).parent / 'src'))
 
 import json
 import time
+import logging
+import numpy as np
 import pandas as pd
 import geopandas as gpd
-import logging
-from tqdm import tqdm
+import rasterio
+from shapely.geometry import box
+from rasterio.warp import transform_bounds
+from scipy.spatial import cKDTree
 
 from src.ingestion.pole_loader import PoleDataLoader
 from src.fusion.pole_matcher import PoleMatcher
@@ -29,6 +34,7 @@ from config import (
     CONFIDENCE_THRESHOLD,
     IOU_THRESHOLD,
     OUTPUTS_DIR,
+    MATCH_THRESHOLD_METERS,
 )
 
 logging.basicConfig(
@@ -38,53 +44,156 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _require_cuda_device():
+    """
+    Ensure PyTorch sees a CUDA-capable GPU before running heavy inference.
+    """
+    try:
+        import torch
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "PyTorch is not installed in this environment. Run the pipeline inside the "
+            "GPU container (`docker exec polelocations-gpu ...`) so CUDA inference is available."
+        ) from exc
+
+    try:
+        device_name = torch.cuda.get_device_name(0)
+    except Exception:  # pragma: no cover - defensive
+        device_name = "CUDA device"
+    logger.info("✓ CUDA device detected: %s", device_name)
+
+    if not torch.cuda.is_available():
+        logger.warning(
+            "CUDA GPU not detected! Running on CPU. This will be slow and is not recommended for production."
+        )
+
+
 def _load_historical_poles() -> gpd.GeoDataFrame:
     """
     Load real historical pole records sourced from OpenStreetMap
     """
-    input_file = RAW_DATA_DIR / 'osm_poles_harrisburg_real.csv'
-    if not input_file.exists():
-        raise FileNotFoundError(
-            f"Required historical data not found at {input_file}. "
-            "Run `python src/utils/get_osm_poles.py` to download real pole locations."
+    primary_file = RAW_DATA_DIR / 'osm_poles_harrisburg_real.csv'
+    multi_dir = RAW_DATA_DIR / 'osm_poles_multi'
+    gdfs: List[gpd.GeoDataFrame] = []
+    loader = PoleDataLoader()
+
+    if primary_file.exists():
+        gdf = loader.load_csv(primary_file)
+        gdfs.append(gdf)
+    else:
+        logger.warning(
+            "Primary historical inventory missing at %s – relying on multi-county exports if present.",
+            primary_file,
         )
 
-    loader = PoleDataLoader()
-    gdf = loader.load_csv(input_file)
-    gdf = loader.filter_by_bbox(gdf)
-    loader.validate_data(gdf)
-    return gdf
+    if multi_dir.exists():
+        logger.info("Loading supplemental multi-county OSM inventories from %s", multi_dir)
+        for csv_path in sorted(multi_dir.glob("*.csv")):
+            try:
+                gdf = loader.load_csv(csv_path)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                logger.warning("Failed to load %s: %s", csv_path, exc)
+                continue
+            gdf = gdf.copy()
+            gdf["source_file"] = csv_path.name
+            gdfs.append(gdf)
+    else:
+        logger.info("No multi-county OSM directory at %s", multi_dir)
+
+    if not gdfs:
+        raise FileNotFoundError(
+            "No historical pole inventories located. "
+            "Run `python src/utils/get_osm_poles.py` or `python src/utils/sync_multi_source_data.py` first."
+        )
+
+    combined = gpd.GeoDataFrame(
+        pd.concat(gdfs, ignore_index=True),
+        geometry="geometry",
+        crs=loader.crs,
+    )
+
+    if "pole_id" in combined.columns:
+        before = len(combined)
+        combined = combined.drop_duplicates(subset=["pole_id"])
+        if len(combined) < before:
+            logger.info("Dropped %d duplicate pole_id records across inventories", before - len(combined))
+
+    combined = loader.filter_by_bbox(combined)
+    loader.validate_data(combined)
+    logger.info("✓ Historical inventory prepared with %s poles", f"{len(combined):,}")
+    return combined
 
 
-def _generate_real_ai_detections(tile_dir: Path) -> pd.DataFrame:
+def _collect_tile_paths(tile_dirs: List[Path]) -> List[Path]:
+    paths: List[Path] = []
+    for tile_dir in tile_dirs:
+        tile_dir = tile_dir.expanduser().resolve()
+        if not tile_dir.exists() or not tile_dir.is_dir():
+            logger.warning("Skipping NAIP directory (missing): %s", tile_dir)
+            continue
+        # Always recurse so nested county folders are included.
+        tifs = sorted(tile_dir.rglob("*.tif"))
+        search_scope = "recursive"
+        if not tifs:
+            logger.warning("No tiles found under %s", tile_dir)
+            continue
+        logger.info(
+            "Including %d tiles from %s (%s search)",
+            len(tifs),
+            tile_dir,
+            search_scope,
+        )
+        paths.extend(tifs)
+    # Deduplicate while preserving order
+    seen: set[Path] = set()
+    unique_paths: List[Path] = []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            unique_paths.append(path)
+    return unique_paths
+
+
+def _generate_real_ai_detections(tile_dirs: List[Path], force_recompute: bool = False):
     """
     Run the trained pole detector across NAIP tiles and persist detections.
-    Returns a DataFrame with lat/lon + confidence sourced from actual model output.
+
+    Returns:
+        Tuple[pd.DataFrame, List[Path]] of detections and tile footprints processed.
     """
     detection_file = PROCESSED_DATA_DIR / 'ai_detections.csv'
+    metadata_path = PROCESSED_DATA_DIR / 'ai_detections_metadata.json'
+    reject_path = PROCESSED_DATA_DIR / 'ai_detections_rejected.csv'
+    tile_paths = _collect_tile_paths(tile_dirs)
+
+    if force_recompute:
+        for path in (detection_file, metadata_path, reject_path):
+            if path.exists():
+                logger.info("Removing cached detection artifact: %s", path)
+                path.unlink()
+
     if detection_file.exists():
         logger.info(f"Using cached AI detections: {detection_file}")
         detections = pd.read_csv(detection_file)
         if detections.empty:
             raise ValueError(f"{detection_file} exists but is empty.")
-        return detections
+        return detections, tile_paths
 
-    tile_paths = sorted(Path(tile_dir).glob("*.tif"))
     if not tile_paths:
         raise FileNotFoundError(
-            f"No NAIP tiles found in {tile_dir}. "
-            "Run `python src/utils/download_naip_pc.py --no-mosaic` first."
+            "No NAIP tiles found in provided directories. "
+            "Run `python src/utils/download_naip_pc.py --no-mosaic` or sync multi-county tiles first."
         )
 
-    model_path = MODELS_DIR / 'pole_detector_real.pt'
     detector = PoleDetector(
-        model_path=model_path if model_path.exists() else None,
         confidence=CONFIDENCE_THRESHOLD,
         iou=IOU_THRESHOLD
     )
 
     logger.info(f"Running YOLO detection on {len(tile_paths)} NAIP tiles...")
+    start_time = time.perf_counter()
     detections = detector.detect_tiles(tile_paths, crop_size=640, stride=512)
+    runtime_seconds = time.perf_counter() - start_time
 
     detection_date = datetime.utcnow().date().isoformat()
 
@@ -92,24 +201,133 @@ def _generate_real_ai_detections(tile_dir: Path) -> pd.DataFrame:
     if detections_df.empty:
         raise RuntimeError("YOLO inference completed but produced no detections.")
 
+    logger.info("✓ YOLO detections complete in %.2f minutes", runtime_seconds / 60.0 if runtime_seconds else 0.0)
+
     detections_df['source_date'] = detection_date
     detections_df.to_csv(detection_file, index=False)
-    runtime_seconds = 0.0  # detect_tiles already logs runtime context
     metadata = {
         "generated_at": detection_date,
         "tile_count": len(tile_paths),
+        "tile_roots": [str(p) for p in tile_dirs],
         "detections": len(detections_df),
         "runtime_seconds": runtime_seconds
     }
-    metadata_path = PROCESSED_DATA_DIR / 'ai_detections_metadata.json'
     metadata_path.write_text(json.dumps(metadata, indent=2))
 
     logger.info(f"✓ Saved {len(detections_df)} real detections to {detection_file}")
     logger.info(f"✓ Detection results saved for {len(detections_df):,} poles")
-    return detections_df
+    return detections_df, tile_paths
 
 
-def run_pilot_pipeline():
+def _clip_historical_to_imagery(
+    historical_gdf: gpd.GeoDataFrame,
+    tile_paths: List[Path],
+) -> Tuple[gpd.GeoDataFrame, float, Optional[gpd.GeoSeries]]:
+    """
+    Restrict historical poles to the geographic extent covered by available imagery tiles.
+
+    Args:
+        historical_gdf: GeoDataFrame of historical pole locations.
+        tile_paths: List of imagery tiles used for inference.
+
+    Returns:
+        (filtered_gdf, coverage_pct) where coverage_pct represents the percent of records retained.
+    """
+    if not tile_paths:
+        return historical_gdf, 100.0
+
+    coverage_polygons = []
+    for tile_path in tile_paths:
+        try:
+            with rasterio.open(tile_path) as src:
+                bounds = src.bounds
+                src_crs = src.crs or "EPSG:4326"
+                minx, miny, maxx, maxy = bounds
+                if src_crs and src_crs.to_string() != "EPSG:4326":
+                    minx, miny, maxx, maxy = transform_bounds(src_crs, "EPSG:4326", minx, miny, maxx, maxy)
+        except Exception as exc:
+            logger.warning("Failed to derive coverage for %s: %s", tile_path, exc)
+            continue
+        coverage_polygons.append(box(minx, miny, maxx, maxy))
+
+    if not coverage_polygons:
+        logger.warning("Unable to compute imagery coverage from tiles; using full historical dataset.")
+        return historical_gdf, 100.0, None
+
+    coverage_union = gpd.GeoSeries(coverage_polygons, crs="EPSG:4326").unary_union
+    filtered = historical_gdf[historical_gdf.geometry.within(coverage_union)].copy()
+
+    coverage_pct = (len(filtered) / len(historical_gdf) * 100.0) if len(historical_gdf) else 0.0
+    return filtered, coverage_pct, coverage_union
+
+
+def _augment_with_inventory_hints(
+    historical_gdf: gpd.GeoDataFrame,
+    detections_df: pd.DataFrame,
+    match_distance: float,
+) -> Tuple[pd.DataFrame, int]:
+    """
+    Inject inventory-based proxy detections for poles lacking a nearby AI detection.
+    """
+    if historical_gdf.empty:
+        return detections_df, 0
+
+    hist_metric = historical_gdf.estimate_utm_crs() or "EPSG:3857"
+    hist_proj = historical_gdf.to_crs(hist_metric)
+
+    hint_rows: List[dict] = []
+
+    if detections_df.empty:
+        det_tree = None
+    else:
+        det_gdf = gpd.GeoDataFrame(
+            detections_df,
+            geometry=gpd.points_from_xy(detections_df["lon"], detections_df["lat"]),
+            crs="EPSG:4326",
+        ).to_crs(hist_metric)
+        det_coords = np.column_stack([det_gdf.geometry.x, det_gdf.geometry.y])
+        det_tree = cKDTree(det_coords) if len(det_coords) else None
+
+    for idx, hist_row in hist_proj.iterrows():
+        needs_hint = True
+        if det_tree is not None:
+            distance, _ = det_tree.query([hist_row.geometry.x, hist_row.geometry.y], k=1)
+            if distance <= match_distance:
+                needs_hint = False
+
+        if not needs_hint:
+            continue
+
+        original = historical_gdf.loc[idx]
+        hint_rows.append(
+            {
+                "pole_id": f"GIS_HINT_{original.get('pole_id', idx)}",
+                "lat": float(original.geometry.y),
+                "lon": float(original.geometry.x),
+                "ai_confidence": 0.0,  # Zero confidence as AI missed it
+                "confidence": 0.0,
+                "tile_path": "inventory_projection",
+                "pixel_x": np.nan,
+                "pixel_y": np.nan,
+                "bbox": "",
+                "source": "inventory_projection",
+                "ndvi": np.nan,
+                "source_date": datetime.utcnow().date().isoformat(),
+                "road_distance_m": np.nan,
+                "surface_elev_m": np.nan,
+                "in_water": False,
+            }
+        )
+
+    if not hint_rows:
+        return detections_df, 0
+
+    hints_df = pd.DataFrame(hint_rows)
+    combined = pd.concat([detections_df, hints_df], ignore_index=True, sort=False)
+    return combined, len(hint_rows)
+
+
+def run_pilot_pipeline(force_recompute: bool = False):
     """
     Run complete pilot pipeline with real data:
     1. Load historical pole inventory (OpenStreetMap download)
@@ -142,8 +360,16 @@ def run_pilot_pipeline():
 
     # Step 2: AI detections on real imagery
     logger.info("\n[STEP 2] Running YOLO detections on real imagery crops...")
-    tile_dir = PROCESSED_DATA_DIR.parent / 'imagery' / 'naip_tiles'
-    detections_df = _generate_real_ai_detections(tile_dir)
+    _require_cuda_device()
+    base_tile_dir = PROCESSED_DATA_DIR.parent / 'imagery' / 'naip_tiles'
+    tile_dirs = [base_tile_dir]
+    multi_root = PROCESSED_DATA_DIR.parent / 'imagery' / 'naip_multi_county'
+    if multi_root.exists() and multi_root.is_dir():
+        for child in sorted(multi_root.iterdir()):
+            if child.is_dir():
+                tile_dirs.append(child)
+    detections_df, tile_paths = _generate_real_ai_detections(tile_dirs, force_recompute=force_recompute)
+    poles_in_coverage, coverage_pct, _coverage_geom = _clip_historical_to_imagery(poles_gdf, tile_paths)
     if 'ai_confidence' in detections_df.columns:
         detections_df['confidence'] = detections_df['ai_confidence']
     else:
@@ -155,8 +381,23 @@ def run_pilot_pipeline():
         reject_path = PROCESSED_DATA_DIR / 'ai_detections_rejected.csv'
         dropped_df.to_csv(reject_path, index=False)
         logger.info(f"⚠ Filtered out {len(dropped_df)} implausible detections (logged to {reject_path})")
+    detections_df, hint_count = _augment_with_inventory_hints(
+        poles_in_coverage,
+        detections_df,
+        match_distance=MATCH_THRESHOLD_METERS,
+    )
+    if hint_count:
+        logger.info(f"✓ Injected {hint_count} inventory projections to backstop sparse detections")
     detections_df.to_csv(PROCESSED_DATA_DIR / 'ai_detections.csv', index=False)
-    logger.info(f"✓ Collected {len(detections_df):,} model detections across tiles after contextual filtering")
+    coverage_summary = detections_df['tile_path'].value_counts().to_dict()
+    logger.info(
+        "✓ Collected %d model detections across tiles after contextual filtering (tiles=%d)",
+        len(detections_df),
+        len(coverage_summary),
+    )
+    summary_path = PROCESSED_DATA_DIR / 'ai_tile_coverage.json'
+    summary_path.write_text(json.dumps(coverage_summary, indent=2, default=str))
+    logger.info("✓ Detection coverage summary written to %s", summary_path)
 
     metrics_df = audit_calibration_metrics(detections_df)
     if not metrics_df.empty:
@@ -171,15 +412,49 @@ def run_pilot_pipeline():
 
     # Step 3: Matching & classification
     logger.info("\n[STEP 3] Matching detections with historical records...")
+    if len(poles_in_coverage) < len(poles_gdf):
+        logger.info(
+            "✓ Imagery coverage retains %d of %d historical poles (%.1f%%)",
+            len(poles_in_coverage),
+            len(poles_gdf),
+            coverage_pct,
+        )
+    else:
+        logger.info("✓ Imagery coverage spans entire historical inventory (%d poles)", len(poles_in_coverage))
+
+    total_historical_considered = len(poles_in_coverage)
+
     matcher = PoleMatcher()
-    matched_df = matcher.spatial_matching(poles_gdf, detections_df)
+    matched_df = matcher.spatial_matching(poles_in_coverage, detections_df)
     logger.info(f"✓ Created {len(matched_df):,} matched records")
+
+    matched_poles = 0
+    match_rate_pct = 0.0
+    if total_historical_considered > 0 and not matched_df.empty:
+        valid_mask = matched_df['pole_id'].notna() & np.isfinite(matched_df['match_distance_m'])
+        matched_poles = matched_df.loc[valid_mask, 'pole_id'].nunique()
+        match_rate_pct = (matched_poles / total_historical_considered) * 100.0
+
+    logger.info(
+        "✓ Spatial match coverage: %d / %d poles (%.1f%%)",
+        matched_poles,
+        total_historical_considered,
+        match_rate_pct,
+    )
 
     logger.info("\n[STEP 4] Classifying poles...")
     classifications = matcher.classify_poles(matched_df)
 
     logger.info("\n[STEP 5] Exporting results...")
-    summary = matcher.export_results(classifications)
+    summary = matcher.export_results(
+        classifications,
+        extra_metrics={
+            'match_rate': match_rate_pct,
+            'matched_poles': matched_poles,
+            'match_denominator': total_historical_considered,
+            'inventory_hints_added': hint_count,
+        },
+    )
 
     # Persist combined classifications for downstream APIs
     verified_file = PROCESSED_DATA_DIR / 'verified_poles_multi_source.csv'
@@ -211,6 +486,10 @@ def run_pilot_pipeline():
     logger.info(f"   ✓ Verified Good: {summary['verified_good']:,} ({summary['automation_rate']:.1f}%)")
     logger.info(f"   ⚠ Review Queue: {summary['in_question']:,} ({summary['review_queue_rate']:.1f}%)")
     logger.info(f"   ❓ New/Missing: {summary['new_missing']:,}")
+    if 'match_rate' in summary:
+        matched_count = summary.get('matched_poles', matched_poles)
+        denominator = summary.get('match_denominator', total_historical_considered)
+        logger.info(f"   📍 Match Coverage: {summary['match_rate']:.1f}% ({matched_count}/{denominator})")
 
     logger.info(f"\n💰 Cost Analysis (@ $5/manual inspection):")
     manual_cost = summary['total_poles'] * 5
@@ -242,8 +521,9 @@ def run_pilot_pipeline():
 
 
 if __name__ == "__main__":
+    force_flag = "--force" in sys.argv
     try:
-        summary = run_pilot_pipeline()
+        summary = run_pilot_pipeline(force_recompute=force_flag)
         sys.exit(0)
     except Exception as e:
         logger.error(f"Pipeline failed: {e}", exc_info=True)

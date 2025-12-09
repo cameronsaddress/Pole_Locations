@@ -10,8 +10,11 @@ export default function ModelPerformance() {
       .catch(err => console.error('Failed to load metrics:', err))
   }, [])
 
-  const formatPercent = (value: number | null | undefined) =>
-    value != null && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '--'
+  const formatPercent = (value: number | null | undefined, decimals = 1) => {
+    if (value == null || !Number.isFinite(value)) return '--'
+    const clamped = Math.max(0, Math.min(Number(value), 1))
+    return `${(clamped * 100).toFixed(decimals)}%`
+  }
 
   const formatNumber = (value: number | null | undefined) =>
     value != null && Number.isFinite(value) ? value.toLocaleString() : '--'

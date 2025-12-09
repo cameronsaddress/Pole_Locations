@@ -1,0 +1,15 @@
+YOLO Pole Detector Training Summary
+============================================================
+map50: 0.8509499185432879
+map50_95: 0.7758810587597641
+precision: 0.7847520681434782
+recall: 0.8633405639913232
+epochs: 220
+batch_size: 16
+img_size: 640
+model: yolov8m.pt
+device: cuda
+timestamp: 2025-10-21T23:23:01.482469
+output_dir: /workspace/models/pole_detector_v6
+best_weights: /workspace/models/pole_detector_v6/weights/best.pt
+last_weights: /workspace/models/pole_detector_v6/weights/last.pt

@@ -1,0 +1,38 @@
+run_name: pole_detector_v6
+dataset: data/processed/pole_training_dataset_v5_split/dataset.yaml
+model: yolov8m.pt
+imgsz: 640
+batch: 16
+epochs: 220
+patience: 60
+optimizer: AdamW
+learning_rate: 0.00035
+warmup_epochs: 5.0
+cos_lr: true
+augment:
+  mosaic: 0.6
+  mixup: 0.15
+  hsv:
+    - 0.015
+    - 0.6
+    - 0.5
+  degrees: 12.0
+  translate: 0.12
+  scale: 0.25
+  shear: 0.0
+  fliplr: 0.5
+regularization:
+  weight_decay: 0.00045
+  label_smoothing: 0.03
+workers: 12
+seed: 321
+validation:
+  metrics:
+    - precision
+    - recall
+    - map50
+    - map50_95
+  val_split: 0.15
+notes:
+  - Training on 512px crops at 0.6 m GSD; negatives keep empty labels.
+  - Post-train threshold calibration planned via calibration_audit.py.

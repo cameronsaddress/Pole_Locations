@@ -39,13 +39,13 @@ def download_osm_poles_harrisburg():
         tags = {'power': ['pole', 'tower', 'portal', 'catenary_mast']}
 
         logger.info("Downloading power poles...")
-        gdf = ox.features_from_point(point, tags=tags, dist=dist)
+        gdf = ox.geometries_from_point(point, tags=tags, dist=dist)
 
         if len(gdf) == 0:
             logger.warning("No poles found! Trying broader search...")
             # Try with just power tag
             tags2 = {'power': True}
-            gdf = ox.features_from_point(point, tags=tags2, dist=dist)
+            gdf = ox.geometries_from_point(point, tags=tags2, dist=dist)
 
             # Filter to just poles/towers
             if len(gdf) > 0:

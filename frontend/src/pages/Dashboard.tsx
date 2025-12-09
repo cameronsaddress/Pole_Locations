@@ -202,7 +202,7 @@ export default function Dashboard() {
       } else if (res.ok) {
         const data = (await res.json()) as PipelineStatus
         setPipelineStatus(data)
-        setMessage('Pipeline run kicked off. The dashboard will update once new results land.')
+        setMessage('Full verification pipeline kicked off. Detections are regenerating and updates may take several minutes.')
       }
     } catch (err) {
       console.error('Failed to trigger pipeline', err)
@@ -246,12 +246,15 @@ export default function Dashboard() {
   }
 
   const stats = verificationStats
-  const totalPoles =
-    stats.total_poles || metrics?.total_poles_processed || metrics?.total_poles_available || 0
-  const verifiedCount = stats.verified_good.count || metrics?.poles_auto_approved || 0
-  const reviewCount = stats.in_question.count || metrics?.poles_needing_review || 0
+  const metricTotal = metrics?.total_poles_processed ?? metrics?.total_poles_available
+  const totalPoles = metricTotal ?? stats.total_poles ?? 0
+  const metricVerified = metrics?.poles_auto_approved
+  const verifiedCount = metricVerified ?? stats.verified_good?.count ?? 0
+  const metricReview = metrics?.poles_needing_review
+  const reviewCount = metricReview ?? stats.in_question?.count ?? 0
   const missingSource = stats.missing_new ?? stats.new_detection
-  const missingCount = missingSource?.count || metrics?.poles_needing_inspection || 0
+  const metricMissing = metrics?.poles_needing_inspection
+  const missingCount = metricMissing ?? missingSource?.count ?? 0
   const missingColor = missingSource?.color ?? CLASSIFICATION_COLORS.missing
   const avgConfidence = typeof stats.average_confidence === 'number' ? stats.average_confidence : null
   const automationRate =

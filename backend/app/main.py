@@ -11,7 +11,7 @@ from pathlib import Path
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent.parent / 'src'))
 
-from app.api.v1 import poles, metrics, maps, pipeline
+from app.api.v1 import poles, metrics, maps, pipeline, mapillary
 
 app = FastAPI(
     title="PoleVision AI",
@@ -29,6 +29,7 @@ app.add_middleware(
         "http://localhost:5174",
         "http://localhost:3000",
         "http://localhost:3022",
+        "http://100.83.153.43:5173",
     ],  # Vite default ports & fallbacks
     allow_credentials=True,
     allow_methods=["*"],
@@ -40,6 +41,7 @@ app.include_router(poles.router, prefix="/api/v1", tags=["poles"])
 app.include_router(metrics.router, prefix="/api/v1", tags=["metrics"])
 app.include_router(maps.router, prefix="/api/v1", tags=["maps"])
 app.include_router(pipeline.router, prefix="/api/v1", tags=["pipeline"])
+app.include_router(mapillary.router, prefix="/api/v1", tags=["mapillary"])
 
 @app.get("/")
 async def root():

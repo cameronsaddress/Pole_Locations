@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable
 import traceback
 import sys
 
@@ -16,8 +16,6 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
   sys.path.append(str(PROJECT_ROOT))
-
-from run_pilot import run_pilot_pipeline  # type: ignore  # pylint: disable=import-error
 
 _executor = ThreadPoolExecutor(max_workers=1)
 _lock = Lock()
@@ -29,6 +27,32 @@ _status: Dict[str, Any] = {
   "error": None,
   "message": "Pipeline has not been executed in this session.",
 }
+_run_pilot_callable: Optional[Callable[..., None]] = None
+_import_error: Optional[BaseException] = None
+
+
+def _load_run_pilot() -> Callable[..., None]:
+  """Import run_pilot lazily so the API can start even if heavy deps are absent."""
+  global _run_pilot_callable, _import_error  # pylint: disable=global-statement
+  if _run_pilot_callable is not None:
+    return _run_pilot_callable
+
+  try:
+    from run_pilot import run_pilot_pipeline as _runner  # type: ignore  # pylint: disable=import-error
+  except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+    _import_error = exc
+    raise RuntimeError(
+      "Pipeline dependencies are unavailable. Install the geospatial stack to enable pipeline runs."
+    ) from exc
+  except Exception as exc:  # pragma: no cover - defensive
+    _import_error = exc
+    raise RuntimeError(
+      "Pipeline dependencies failed to initialize. Inspect server logs for root cause."
+    ) from exc
+
+  _import_error = None
+  _run_pilot_callable = _runner
+  return _runner
 
 
 def _update_status(**kwargs: Any) -> None:
@@ -60,10 +84,15 @@ def _run_pipeline_task() -> Dict[str, Any]:
     started_at=started_at,
     finished_at=None,
     error=None,
-    message="Pipeline execution in progress.",
+    message="Pipeline execution in progress (regenerating detections).",
   )
   try:
-    run_pilot_pipeline()
+    runner = _load_run_pilot()
+    try:
+      runner(force_recompute=True)
+    except TypeError:
+      # Backwards compatibility with older implementations that ignore the flag.
+      runner()
   except Exception as exc:  # pragma: no cover - protective logging
     tb = traceback.format_exc()
     finished_at = datetime.utcnow().isoformat()

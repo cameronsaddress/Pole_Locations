@@ -7,12 +7,14 @@ Token is free to generate from https://www.mapillary.com/dashboard/developer
 """
 import argparse
 import os
+import sys
 from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
 import requests
 
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 from config import RAW_DATA_DIR, PROCESSED_DATA_DIR
 
 
@@ -86,12 +88,16 @@ def _fetch_bbox_images(token: str, bbox: List[float], limit: int) -> List[dict]:
     remaining = limit
 
     while next_url and remaining > 0:
-        response = requests.get(
-            next_url,
-            params=params if next_url == MAPILLARY_API else None,
-            timeout=30,
-            headers={"User-Agent": USER_AGENT},
-        )
+        try:
+            response = requests.get(
+                next_url,
+                params=params if next_url == MAPILLARY_API else None,
+                timeout=30,
+                headers={"User-Agent": USER_AGENT},
+            )
+        except requests.RequestException as exc:
+            print(f"Mapillary request error ({next_url}): {exc}")
+            break
         if not response.ok:
             message = "Unknown error"
             try:

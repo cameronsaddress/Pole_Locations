@@ -6,6 +6,7 @@ import ModelPerformance from './pages/ModelPerformance'
 import ReviewQueue from './pages/ReviewQueue'
 import Analytics from './pages/Analytics'
 import DiffViewer from './pages/DiffViewer'
+import MapillaryLabeler from './pages/MapillaryLabeler'
 import './App.css'
 
 function App() {
@@ -25,6 +26,8 @@ function App() {
         return <Analytics />
       case 'diff':
         return <DiffViewer />
+      case 'labeler':
+        return <MapillaryLabeler />
       default:
         return <Dashboard />
     }

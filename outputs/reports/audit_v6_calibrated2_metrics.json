@@ -1,0 +1,15 @@
+{
+  "historical_total": 1099,
+  "detections_total": 81,
+  "matched_historical": 0,
+  "matched_detections": 0,
+  "recall": 0.0,
+  "recall_pct": 0.0,
+  "precision": 0.0,
+  "precision_pct": 0.0,
+  "threshold_m": 30.0,
+  "historical_median_distance": 1607.096477751671,
+  "historical_p95_distance": 3739.1000232305187,
+  "detection_median_distance": 1396.9069947755565,
+  "detection_p95_distance": 5596.901577004106
+}

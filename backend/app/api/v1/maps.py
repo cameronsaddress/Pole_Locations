@@ -15,7 +15,14 @@ from config import RAW_DATA_DIR, PROCESSED_DATA_DIR
 router = APIRouter()
 
 @router.get("/maps/poles-geojson")
-async def get_poles_geojson(limit: int = 2000):
+async def get_poles_geojson(
+    limit: int = 2000,
+    north: float | None = None,
+    south: float | None = None,
+    east: float | None = None,
+    west: float | None = None,
+    bbox: str | None = None,
+):
     """
     Get poles as GeoJSON for map display
     NOW USING MULTI-SOURCE VERIFICATION with color-coded confidence
@@ -39,6 +46,17 @@ async def get_poles_geojson(limit: int = 2000):
             df = df.head(limit)
         use_verified = False
 
+    if bbox and all(part.strip() for part in bbox.split(",")) and len(bbox.split(",")) == 4:
+        try:
+            west_str, south_str, east_str, north_str = bbox.split(",")
+            west = float(west_str)
+            south = float(south_str)
+            east = float(east_str)
+            north = float(north_str)
+        except ValueError:
+            # Ignore malformed bbox; fall back to explicit params/default behaviour
+            west = south = east = north = None
+
     if use_verified:
         if 'lat' not in df.columns and 'detection_lat' in df.columns:
             df['lat'] = df['detection_lat']
@@ -56,11 +74,27 @@ async def get_poles_geojson(limit: int = 2000):
             df['num_sources'] = df['classification'].apply(lambda c: 1 if c == 'new_missing' else 2)
         if 'total_confidence' not in df.columns:
             df['total_confidence'] = df.get('detection_confidence', 0.0)
-        if limit and limit > 0:
-            df = df.head(limit)
 
     # Drop rows with NaN lat/lon
     df = df.dropna(subset=['lat', 'lon'])
+
+    # Apply viewport filter if requested (bounding box order west,south,east,north)
+    if all(v is not None for v in (south, west, north, east)):
+        south_val = float(south)  # type: ignore[arg-type]
+        west_val = float(west)    # type: ignore[arg-type]
+        north_val = float(north)  # type: ignore[arg-type]
+        east_val = float(east)    # type: ignore[arg-type]
+        lat_min = min(south_val, north_val)
+        lat_max = max(south_val, north_val)
+        lon_min = min(west_val, east_val)
+        lon_max = max(west_val, east_val)
+        df = df[
+            (df['lat'] >= lat_min) & (df['lat'] <= lat_max) &
+            (df['lon'] >= lon_min) & (df['lon'] <= lon_max)
+        ]
+
+    if limit and limit > 0:
+        df = df.head(limit)
 
     def clean_float(value):
         """Convert value to float or return None if not finite."""
@@ -206,7 +240,14 @@ async def get_poles_geojson(limit: int = 2000):
         "features": features,
         "metadata": {
             "using_verified_data": use_verified,
-            "total_features": len(features)
+            "total_features": len(features),
+            "limit_applied": bool(limit and limit > 0),
+            "requested_bounds": {
+                "north": north,
+                "south": south,
+                "east": east,
+                "west": west,
+            } if any(v is not None for v in (north, south, east, west)) else None,
         }
     }
 

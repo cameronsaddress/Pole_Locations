@@ -18,6 +18,7 @@ from config import (
     DASHBOARD_TITLE, PROCESSED_DATA_DIR, EXPORTS_OUTPUT_DIR,
     VERIFIED_CONFIDENCE_THRESHOLD
 )
+from mapillary_labeler import render_mapillary_labeler
 
 # Page configuration
 st.set_page_config(
@@ -132,9 +133,32 @@ def main():
     """Main dashboard application"""
 
     # Header
+if "polevision_mode" not in st.session_state:
+    st.session_state["polevision_mode"] = "dashboard"
+
+header_cols = st.columns([0.75, 0.25])
+with header_cols[0]:
     st.markdown(f'<div class="main-header">{DASHBOARD_TITLE}</div>', unsafe_allow_html=True)
-    st.markdown("**AI-Powered Automation for East Coast Pole Verification**")
-    st.markdown("---")
+    if st.session_state["polevision_mode"] == "labeler":
+        st.markdown("**Mapillary Label Review**")
+    else:
+        st.markdown("**AI-Powered Automation for East Coast Pole Verification**")
+
+with header_cols[1]:
+    if st.session_state["polevision_mode"] == "labeler":
+        if st.button("← Back to Dashboard", use_container_width=True):
+            st.session_state["polevision_mode"] = "dashboard"
+            st.experimental_rerun()
+    else:
+        if st.button("Mapillary Labeler", use_container_width=True):
+            st.session_state["polevision_mode"] = "labeler"
+            st.experimental_rerun()
+
+st.markdown("---")
+
+if st.session_state["polevision_mode"] == "labeler":
+    render_mapillary_labeler(include_title=False)
+    st.stop()
 
     # Sidebar navigation
     st.sidebar.title("Navigation")

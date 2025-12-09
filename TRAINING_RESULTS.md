@@ -312,3 +312,107 @@ ls -lh models/pole_detector_v1/
 🎯 **Next Action: Increase crop size and retrain**
 
 The infrastructure is solid. We just need to adjust the scale to make poles more visible to the neural network.
+
+
+## Update 2025-10-23 16:18Z
+
+### Dataset
+- Train: 834 imgs, Val: 209 imgs (256×256 NAIP crops)
+- Source: OSM + NAIP (PA multi-county + NY coverage)
+- Data prep: verify_training_data.py + prepare_yolo_dataset.py
+
+### Experiment Summary
+1. **pole_detector_v7 (yolov8m, 120 epochs)**
+   - SGD lr=0.01, mosaic=0.3, mixup=0.1, img=640, batch=32
+   - Val precision 0.9586, recall 0.9091, mAP50 0.9360, mAP50-95 0.7184
+2. **Hyperparameter sweep (60 epochs each)**
+   - lr=0.005, mosaic=0.2 → mAP50 0.9519, recall 0.9139 (mAP50-95 0.6405)
+   - lr=0.005, mosaic=0.4 → mAP50 0.9326, recall 0.8947
+   - lr=0.01, mosaic=0.2 → **best** precision 0.9496, recall 0.9234, mAP50 0.9595, mAP50-95 0.7665
+   - lr=0.01, mosaic=0.4 → precision 0.9461, recall 0.9187, mAP50 0.9482
+
+### Deployment
+- Promoted sweep_lr0.01_mos0.2/weights/best.pt → models/pole_detector_real.pt
+- Threshold sweep (conf ∈ {0.05,0.1,0.15,0.2}, IoU ∈ {0.45,0.5,0.55,0.6})
+  - Optimal: conf=0.20, IoU=0.45 (precision 0.9495, recall 0.9234)
+  - Saved to models/exports/detection_thresholds.json
+- run_pilot.py --force → 21,250 poles, 19,547 verified (92.0% automation)
+
+### Next Steps
+- Train yolov8l baseline for comparison
+- Experiment with copy-paste/cosine schedule tuning
+- Explore pseudo-labeling for inventory projections
+
+
+## Update 2025-10-23 19:35Z
+
+### Dataset Expansion
+- Generated `pole_training_dataset_512` (crop size 512 px) combining Cumberland, Dauphin, York NAIP tiles
+- Total crops: 8,707 (train 6,965 / val 1,742)
+- Scripts: extract_pole_crops.py (per county) + prepare_yolo_dataset.py
+
+### Experiments In Flight
+- **yolov8l_v1** (80 epochs, batch 24) completed: precision 0.9592, recall 0.9002, mAP50 0.9519 (slower & lower recall vs m baseline)
+- **pole_detector_512_v1** (yolov8m on 512 crops, 80 epochs, batch 32) – training in progress (epoch ~40/80).
+  - Tracking results in models/pole_detector_512_v1/results.csv
+  - Expect improved recall due to larger receptive context; monitoring for convergence before redeploy
+
+### Notes
+- Larger crops boost dataset size 10×; expect longer epochs (~90s/iter) but improved generalization
+- Maintaining GPU session for continuous training; avoid competing jobs until run completes
+
+
+## Update 2025-10-23 22:25Z
+
+### Large-crop model (512×512)
+- Dataset: pole_training_dataset_512 (8,707 imgs; train 6,965 / val 1,742)
+- Training: `pole_detector_512_v1` (yolov8m, 80 epochs, batch 32, cos lr)
+  - Val precision 0.9840, recall 0.9707, mAP50 0.9910, mAP50-95 0.8735
+- Deployed weights → models/pole_detector_real.pt
+- YOLOv8l benchmark logged (precision 0.9592 / recall 0.9002) for comparison
+
+### Thresholds
+- Previous sweep (conf 0.20 / IoU 0.45) retained; need rerun with 512‑crop weights (initial attempt hit file suffix guard, rerun in progress)
+
+### Pipeline
+- `run_pilot.py --force` with new model produced 21,250 detections, 19,547 verified (92.0% automation)
+- AI detections metadata: 1702 detections across 190 tiles, runtime 1763s
+### Next Actions
+- Re-run threshold_sweeper after cleanup (model suffix fix)
+- Inspect map/dashboards on ports 5174/8022 for refreshed metrics
+- Consider longer training schedule (120 epochs) and mixup tuning on 512 dataset
+
+
+## Ongoing 2025-10-24 06:39Z
+- `pole_detector_512_v2` training progressing (epoch ~60/120). Awaiting completion before evaluation.
+
+
+## Update 2025-10-24 09:14Z
+- Deployed `pole_detector_512_v2` (threshold sweep => conf 0.10 / IoU 0.60).
+- `run_pilot.py --force` completed; automation steady at 92.0% with 19,547 verified.
+- Started new experiment `yolov8l_512_v1` (80 epochs, batch 24, cos lr) to utilize remaining GPU window.
+
+
+## Plan 2025-10-24 17:18Z
+- Starting extended training run `pole_detector_512_v3` (YOLOv8m, 160 epochs) to exploit remaining GPU time.
+
+## Update 2025-10-25 03:35Z
+
+### pole_detector_512_v3 (YOLOv8m, 160 epochs)
+- Dataset: `pole_training_dataset_512` (6,965 train / 1,742 val, 512×512 crops, NAIP multi-county blend).
+- Schedule: batch 32 @ 640px, SGD lr0=0.008 with 5-epoch warmup, cosine tail, mosaic 0.25, mixup 0.05, label smoothing 0.01.
+- Validation: precision **98.70 %**, recall **96.90 %**, mAP50 **99.25 %**, mAP50‑95 **89.25 %** (see `models/pole_detector_512_v3/training_summary.txt`).
+- Best checkpoint promoted to `models/pole_detector_real.pt` for downstream runs.
+
+### Threshold sweep & deployment
+- Ran `src/detection/threshold_sweeper.py` on GPU across confidences 0.05‑0.12 and IoUs 0.45‑0.65 (results in `outputs/analysis/threshold_sweep_20251025_030208.csv`).
+- Optimal operating point: **confidence 0.09 / IoU 0.65** (precision 98.71 %, recall 96.80 %, mAP50 99.29 %, mAP50‑95 89.81 %); persisted to `models/exports/detection_thresholds.json`.
+- Eval artifacts stored under `outputs/threshold_eval/` for audit.
+
+### Pipeline refresh
+- Rehydrated entire stack with `PYTHONPATH=src python run_pilot.py --force` inside the GPU container.
+- Latest deployment (21,250 poles) produced **19,547 verified good (92.0 % automation)**, 1 review flag, and 1,702 new/missing detections.
+- Exports/dashboards updated in `outputs/exports/*`, `data/processed/ai_detections.csv`, and `data/processed/verified_poles_multi_source.csv`; backend/dashboard restarts inherit the new metrics immediately.
+
+### Next actions
+- GPU freed after pipeline verification; kicking off `pole_detector_512_v4` (YOLOv8m, 220 epochs, tighter mosaic 0.20, mixup 0.10, label smoothing 0.02) to probe longer cosine tails and heavier augmentation. Continuous monitoring enabled so the cluster stays saturated through the new 12‑hour window.

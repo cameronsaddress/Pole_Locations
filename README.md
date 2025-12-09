@@ -150,12 +150,17 @@ Weighted algorithm combines multiple factors:
 # 1. Harvest thumbnails (requires MAPILLARY_TOKEN env)
 PYTHONPATH=src ./venv/bin/python src/utils/harvest_mapillary.py --limit 300
 
-# 2. Label images in data/raw/mapillary/mapillary_labels.csv (image_id,pole|negative)
+# 2. Launch the labeling app (one-click review per frame)
+## Option A: from the PoleVision AI dashboard (top-right “Mapillary Labeler” button)
+## Option B: standalone
+streamlit run dashboard/mapillary_labeler.py
 
-# 3. Ingest labeled thumbnails into the YOLO dataset
+# 3. (Optional) Add notes in the app; labels persist back to the queue CSV automatically.
+
+# 4. Ingest labeled thumbnails into the YOLO dataset
 PYTHONPATH=src ./venv/bin/python src/utils/process_mapillary_labels.py
 
-# 4. Rebuild train/val splits and retrain
+# 5. Rebuild train/val splits and retrain
 PYTHONPATH=src ./venv/bin/python src/utils/prepare_yolo_dataset.py
 PYTHONPATH=src ./venv/bin/python - <<'PY'
 from pathlib import Path
@@ -172,13 +177,74 @@ best = detector.train(
 print('Best weights saved to', best)
 PY
 
-# 5. Re-run the pilot pipeline
-PYTHONPATH=src ./venv/bin/python run_pilot.py
+# 6. Re-run the pilot pipeline
+# IMPORTANT: run heavy inference inside the Docker GPU container so PyTorch keeps CUDA enabled.
+# Running the command from the host venv will fall back to CPU-only builds.
+docker exec -it polelocations-gpu bash -lc 'cd /workspace && PYTHONPATH=src python run_pilot.py'
 ```
 
 ### Diff Viewer
 - Launch the optional Streamlit diff viewer: `streamlit run dashboard/diff_app.py`
 - Configure the React frontend with `VITE_DIFF_VIEWER_URL` (defaults to `http://localhost:8501`).
+
+### Monitoring Active Training
+Keep a dedicated terminal pinned while YOLO training is running so you can watch every epoch update. Launch the command below from the host; it polls the container every five seconds and prints the full header plus the most recent metrics row from `results.csv`.
+
+```bash
+watch -n 5 "docker exec polelocations-gpu bash -lc \"python - <<'PY'
+import csv
+import datetime as dt
+from pathlib import Path
+
+TOTAL_EPOCHS = 220
+csv_path = Path('/workspace/models/pole_detector_v6/results.csv')
+if not csv_path.exists():
+    print('results.csv not found yet')
+    raise SystemExit
+
+rows = list(csv.reader(csv_path.open()))
+if len(rows) <= 1:
+    print('waiting for training epochs to log...')
+    raise SystemExit
+
+header, *records = rows
+last = records[-1]
+
+try:
+    epoch = int(float(last[0]))
+    elapsed = float(last[1])
+except ValueError:
+    print('latest row incomplete...')
+    raise SystemExit
+
+remaining = max(TOTAL_EPOCHS - epoch, 0)
+avg_epoch = elapsed / epoch if epoch else 0.0
+eta_seconds = remaining * avg_epoch
+
+fmt = lambda seconds: str(dt.timedelta(seconds=int(seconds)))
+
+print(f'Epoch {epoch} / {TOTAL_EPOCHS}')
+print(f'Elapsed: {fmt(elapsed)} | Avg/Epoch: {avg_epoch:.1f}s | Remaining epochs: {remaining}')
+print(f'ETA to finish: {fmt(eta_seconds)}')
+print('Last metrics row:')
+print(','.join(header))
+print(','.join(last))
+PY\""
+```
+
+### Multi-County Data Sync
+Automate fresh data pulls (OSM poles, NAIP tiles via Microsoft Planetary Computer, PEMA orthophotos, USGS 3DEP DSM, and Mapillary placeholders) for adjacent counties with:
+
+```bash
+venv/bin/python src/utils/sync_multi_source_data.py --areas dauphin_pa,cumberland_pa,york_pa --naip-max-tiles 2 --pema-tile-span 0.05 --dsm-limit 5 --skip-mapillary
+```
+
+This seeds:
+- OSM pole CSVs under `data/raw/osm_poles_multi/`
+- County-specific NAIP tiles in `data/imagery/naip_multi_county/<slug>/`
+- PEMA orthophotos in `data/imagery/pema_tiles_multi/<slug>/`
+- 3DEP DSM tiles in `data/processed/3dep_dsm_multi/<slug>/`
+- Mapillary staging folders at `data/raw/mapillary_multi/<slug>/` (add a `MAPILLARY_TOKEN` and rerun without `--skip-mapillary` to fetch thumbnails/metadata).
 
 ## Technical Proposal Summary
 

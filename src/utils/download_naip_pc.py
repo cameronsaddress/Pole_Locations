@@ -7,6 +7,7 @@ import logging
 import sys
 import urllib.error
 import urllib.request
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -14,6 +15,7 @@ import pandas as pd
 import planetary_computer as pc
 import rasterio
 import rasterio.errors
+from rasterio.windows import Window
 from pystac_client import Client
 from rasterio.merge import merge
 from rasterio.transform import array_bounds
@@ -25,6 +27,89 @@ from config import IMAGERY_DIR, RAW_DATA_DIR  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _validate_tile(path: Path, sample_size: int = 512) -> bool:
+    """
+    Validate that a GeoTIFF can be opened and that representative windows are readable.
+    """
+    try:
+        with rasterio.open(path) as dataset:
+            if dataset.count < 3:
+                logger.warning("Tile %s has unexpected band count: %d", path.name, dataset.count)
+                return False
+
+            width, height = dataset.width, dataset.height
+            window_w = min(sample_size, width)
+            window_h = min(sample_size, height)
+            corners = [
+                (0, 0),
+                (max(0, width - window_w), 0),
+                (0, max(0, height - window_h)),
+                (max(0, width - window_w), max(0, height - window_h)),
+            ]
+            for col, row in corners:
+                window = Window(col, row, window_w, window_h)
+                dataset.read(1, window=window)
+
+            dataset.checksum(1)
+        return True
+    except rasterio.errors.RasterioIOError as err:
+        logger.warning("Tile %s failed validation: %s", path.name, err)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Unexpected validation error for %s: %s", path.name, exc)
+
+    return False
+
+
+def _download_with_retries(href: str, destination: Path, attempts: int = 3, sleep_seconds: float = 2.0) -> bool:
+    """Download a tile with retry + validation."""
+    for attempt in range(1, attempts + 1):
+        try:
+            urllib.request.urlretrieve(href, destination)
+        except urllib.error.HTTPError as http_err:
+            logger.warning(
+                "  ↳ HTTP error downloading %s (attempt %d/%d): %s",
+                destination.name,
+                attempt,
+                attempts,
+                http_err,
+            )
+            if destination.exists():
+                destination.unlink(missing_ok=True)
+            if http_err.code >= 500 and attempt < attempts:
+                time.sleep(sleep_seconds)
+                continue
+            return False
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "  ↳ Error downloading %s (attempt %d/%d): %s",
+                destination.name,
+                attempt,
+                attempts,
+                exc,
+            )
+            if destination.exists():
+                destination.unlink(missing_ok=True)
+            if attempt < attempts:
+                time.sleep(sleep_seconds)
+                continue
+            return False
+
+        if _validate_tile(destination):
+            return True
+
+        logger.warning(
+            "  ↳ Validation failed for %s (attempt %d/%d); retrying…",
+            destination.name,
+            attempt,
+            attempts,
+        )
+        destination.unlink(missing_ok=True)
+        if attempt < attempts:
+            time.sleep(sleep_seconds)
+
+    return False
 
 
 def _compute_bbox_from_poles(poles_csv: Path, margin: float = 0.02) -> List[float]:
@@ -49,6 +134,7 @@ def download_naip_real(
     mosaic: bool = True,
     max_tiles: int = 20,
     years: Optional[List[int]] = None,
+    metadata_manifest: Optional[Path] = None,
 ):
     """
     Download NAIP imagery covering the bounding box derived from the poles CSV.
@@ -78,7 +164,14 @@ def download_naip_real(
 
         logger.info("\nSearching for NAIP imagery tiles…")
         if not years:
-            years = [2022]
+            preview = catalog.search(collections=["naip"], bbox=bbox)
+            preview_items = list(preview.items())
+            if not preview_items:
+                logger.error("NAIP search returned no scenes; aborting.")
+                return []
+            latest_year = max(item.datetime.year for item in preview_items if item.datetime)
+            years = [latest_year]
+            logger.info(f"No year specified; defaulting to latest available {latest_year}.")
 
         items = []
         for year in years:
@@ -103,6 +196,7 @@ def download_naip_real(
         logger.info(f"✓ Found {len(items)} scenes covering region.")
 
         downloaded_paths = []
+        manifest_records = []
         for item in sorted(items, key=lambda x: x.datetime, reverse=True):
             asset = item.assets.get("image")
             if not asset:
@@ -111,24 +205,50 @@ def download_naip_real(
 
             output_path = imagery_dir / f"{item.id}.tif"
             if output_path.exists():
-                logger.info(f"• Skipping existing tile {output_path.name}")
-                downloaded_paths.append(output_path)
-                continue
+                if _validate_tile(output_path):
+                    logger.info(f"• Skipping existing tile {output_path.name}")
+                    downloaded_paths.append(output_path)
+                    manifest_records.append(
+                        {
+                            "item_id": item.id,
+                            "datetime": item.datetime.isoformat() if item.datetime else None,
+                            "href": asset.href,
+                            "path": str(output_path),
+                            "epsg": item.properties.get("epsg"),
+                            "gsd": item.properties.get("gsd"),
+                        }
+                    )
+                    continue
+                logger.warning(f"• Existing tile {output_path.name} failed validation; re-downloading.")
+                output_path.unlink(missing_ok=True)
 
             signed_href = pc.sign(asset.href)
             logger.info(f"• Downloading {item.id} -> {output_path.name}")
-            try:
-                urllib.request.urlretrieve(signed_href, output_path)
-                downloaded_paths.append(output_path)
-            except urllib.error.HTTPError as http_err:
-                logger.warning(f"  ↳ Skipping {item.id} (HTTP {http_err.code})")
-                if output_path.exists():
-                    output_path.unlink(missing_ok=True)
+            if not _download_with_retries(signed_href, output_path):
+                logger.warning(f"  ↳ Skipping {item.id} after repeated download failures.")
                 continue
+
+            downloaded_paths.append(output_path)
+            manifest_records.append(
+                {
+                    "item_id": item.id,
+                    "datetime": item.datetime.isoformat() if item.datetime else None,
+                    "href": asset.href,
+                    "path": str(output_path),
+                    "epsg": item.properties.get("epsg"),
+                    "gsd": item.properties.get("gsd"),
+                }
+            )
 
             if max_tiles and len(downloaded_paths) >= max_tiles:
                 logger.info(f"Reached max_tiles={max_tiles}, stopping additional downloads.")
                 break
+
+        if metadata_manifest:
+            manifest_df = pd.DataFrame(manifest_records)
+            metadata_manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest_df.to_json(metadata_manifest, orient="records", indent=2)
+            logger.info(f"✓ Manifest written to {metadata_manifest}")
 
         if not downloaded_paths:
             logger.error("No tiles downloaded.")
@@ -214,12 +334,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--years",
         type=str,
-        default="2022",
-        help="Comma-separated list of years to pull (e.g. 2021,2022 for multi-season).",
+        default="",
+        help="Comma-separated list of years to pull (e.g. 2021,2022). If omitted, uses the most recent available.",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=IMAGERY_DIR / "naip_tiles_manifest.json",
+        help="Where to write a manifest JSON enumerating downloaded tiles.",
     )
     args = parser.parse_args()
 
-    years = sorted({int(y.strip()) for y in args.years.split(",") if y.strip()})
+    years = sorted({int(y.strip()) for y in args.years.split(",") if y.strip()}) if args.years else None
 
     logger.info("Attempting to download NAIP imagery for operations grid…")
     tiles = download_naip_real(
@@ -228,6 +354,7 @@ if __name__ == "__main__":
         mosaic=not args.no_mosaic,
         max_tiles=args.max_tiles,
         years=years,
+        metadata_manifest=args.manifest,
     )
 
     if tiles:

@@ -27,7 +27,7 @@ ultralytics==8.3.214
 
 # Image Processing
 pillow==11.0.0
-opencv-python==4.10.0.84
+opencv-contrib-python-headless==4.7.0.72
 
 # Caching
 redis==5.2.1

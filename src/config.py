@@ -40,10 +40,15 @@ EAST_COAST_BBOX = {
 }
 
 # AI Model Configuration
-MODEL_TYPE = "yolov8n"  # YOLOv8 nano (lightweight for local training)
+MODEL_TYPE = "yolov8l"  # YOLOv8 large (enterprise grade accuracy)
 MODEL_INPUT_SIZE = 640
-CONFIDENCE_THRESHOLD = float(os.getenv("DETECTION_CONFIDENCE_THRESHOLD", "0.4"))  # Minimum confidence for detections
-IOU_THRESHOLD = float(os.getenv("DETECTION_IOU_THRESHOLD", "0.55"))  # Intersection over Union for NMS
+# Minimum confidence for detections
+CONFIDENCE_THRESHOLD = float(os.getenv("DETECTION_CONFIDENCE_THRESHOLD", "0.25"))
+IOU_THRESHOLD = float(os.getenv("DETECTION_IOU_THRESHOLD", "0.45"))  # Intersection over Union for NMS
+
+# Detection geospatial calibration (degrees)
+DETECTION_LAT_OFFSET_DEG = float(os.getenv("DETECTION_LAT_OFFSET_DEG", "0.0"))
+DETECTION_LON_OFFSET_DEG = float(os.getenv("DETECTION_LON_OFFSET_DEG", "0.0"))
 
 # Classification Thresholds
 VERIFIED_DISTANCE_THRESHOLD = 5.0  # meters
@@ -55,7 +60,7 @@ FILTER_MAX_ROAD_DISTANCE_M = float(os.getenv("FILTER_MAX_ROAD_DISTANCE_M", "120.
 FILTER_MIN_SURFACE_ELEV_M = float(os.getenv("FILTER_MIN_SURFACE_ELEV_M", "0.0"))
 FILTER_NDVI_LOWER = float(os.getenv("FILTER_NDVI_LOWER", "-0.3"))
 FILTER_NDVI_UPPER = float(os.getenv("FILTER_NDVI_UPPER", "0.75"))
-FILTER_DROP_FAILURES = os.getenv("FILTER_DROP_FAILURES", "0").lower() in {"1", "true", "yes"}
+FILTER_DROP_FAILURES = True  # Always drop failures in enterprise mode
 
 # Confidence Scoring Weights
 WEIGHT_IMAGERY = 0.4

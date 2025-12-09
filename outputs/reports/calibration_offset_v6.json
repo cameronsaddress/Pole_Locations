@@ -1,0 +1,8 @@
+{
+  "dataset": "pole_detector_v6",
+  "median_delta_lat": -0.0074710082003335,
+  "median_delta_lon": 0.01416167413484,
+  "mean_delta_lat": -0.015886183880213046,
+  "mean_delta_lon": 0.020094584809854293,
+  "num_pairs": 81
+}

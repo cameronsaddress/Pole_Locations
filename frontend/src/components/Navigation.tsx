@@ -11,6 +11,7 @@ export default function Navigation({ currentPage, onNavigate }: NavigationProps)
     { id: 'review', label: 'Review Queue', icon: '✓' },
     { id: 'analytics', label: 'Analytics', icon: '📈' },
     { id: 'diff', label: 'Diff Viewer', icon: '🔄' },
+    { id: 'labeler', label: 'Labeling Tool', icon: '🖱️' },
   ]
 
   return (

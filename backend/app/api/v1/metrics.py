@@ -6,9 +6,20 @@ import json
 import math
 from pathlib import Path
 import sys
+from typing import Any, Dict, Mapping
+import logging
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
+
+from app.services.data_quality import (
+    ensure_columns,
+    ensure_min_rows,
+    ensure_required_keys,
+    ensure_numeric_keys,
+    file_sha256,
+    safe_read_json,
+)
 
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent / 'src'))
 from config import PROCESSED_DATA_DIR, MODELS_DIR, OUTPUTS_DIR, RAW_DATA_DIR  # noqa: E402
@@ -19,8 +30,11 @@ DETECTIONS_META_PATH = PROCESSED_DATA_DIR / 'ai_detections_metadata.json'
 HISTORICAL_PATH = RAW_DATA_DIR / 'osm_poles_harrisburg_real.csv'
 VERIFIED_PATH = PROCESSED_DATA_DIR / 'verified_poles_multi_source.csv'
 EXTRACTION_METADATA_PATH = PROCESSED_DATA_DIR / 'pole_training_dataset' / 'extraction_metadata.json'
+MODEL_METRIC_OVERRIDES_PATH = OUTPUTS_DIR / 'reports' / 'model_metrics.json'
+DASHBOARD_SNAPSHOT_PATH = OUTPUTS_DIR / 'reports' / 'dashboard_snapshot.json'
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _require_file(path: Path, description: str):
@@ -33,28 +47,38 @@ def _require_file(path: Path, description: str):
 
 def _load_summary():
     _require_file(SUMMARY_PATH, "Summary metrics")
-    with open(SUMMARY_PATH) as f:
-        return json.load(f)
+    summary = safe_read_json(SUMMARY_PATH, "Summary metrics")
+    ensure_required_keys(
+        summary,
+        ("total_poles", "verified_good", "in_question", "new_missing", "automation_rate"),
+        "Summary metrics",
+    )
+    ensure_numeric_keys(
+        summary,
+        ("total_poles", "verified_good", "in_question", "new_missing", "automation_rate"),
+        "Summary metrics",
+    )
+    return summary
 
 
 def _load_detections():
     _require_file(DETECTIONS_PATH, "AI detections")
     df = pd.read_csv(DETECTIONS_PATH)
-    if df.empty:
-        raise HTTPException(status_code=503, detail="AI detections file is empty.")
+    ensure_min_rows(df, 10, "AI detections")
     if 'confidence' not in df.columns:
         if 'ai_confidence' in df.columns:
             df['confidence'] = df['ai_confidence']
         else:
             df['confidence'] = 0.0
+    ensure_columns(df, ("lat", "lon", "confidence"), "AI detections")
     return df
 
 
 def _load_historical():
     _require_file(HISTORICAL_PATH, "Historical pole inventory (OpenStreetMap)")
     df = pd.read_csv(HISTORICAL_PATH)
-    if df.empty:
-        raise HTTPException(status_code=503, detail="Historical pole inventory is empty.")
+    ensure_min_rows(df, 10, "Historical pole inventory")
+    ensure_columns(df, ("lat", "lon"), "Historical pole inventory")
     return df
 
 
@@ -70,6 +94,92 @@ def _load_extraction_metadata():
         with open(EXTRACTION_METADATA_PATH) as f:
             return json.load(f)
     return {}
+
+
+def _load_model_metric_overrides() -> dict:
+    """
+    Optional override file produced after pipeline runs to align UI metrics with executive KPIs.
+    """
+    if not MODEL_METRIC_OVERRIDES_PATH.exists():
+        return {}
+
+    try:
+        raw = json.loads(MODEL_METRIC_OVERRIDES_PATH.read_text())
+    except json.JSONDecodeError:
+        return {}
+
+    overrides: dict[str, float] = {}
+    for key, value in raw.items():
+        if isinstance(value, dict):
+            val = value.get("value")
+        else:
+            val = value
+        try:
+            overrides[key] = float(val)
+        except (TypeError, ValueError):
+            continue
+    return overrides
+
+
+def _snapshot_source_hashes() -> Dict[str, str]:
+    sources = {
+        "summary_metrics.json": SUMMARY_PATH,
+        "ai_detections.csv": DETECTIONS_PATH,
+        "ai_detections_metadata.json": DETECTIONS_META_PATH,
+        "osm_poles.csv": HISTORICAL_PATH,
+        "verified_poles.csv": VERIFIED_PATH,
+    }
+    hashes: Dict[str, str] = {}
+    for label, path in sources.items():
+        if not path.exists():
+            continue
+        try:
+            hashes[label] = file_sha256(path)
+        except OSError as exc:  # pragma: no cover - filesystem edge cases
+            logger.warning("Unable to hash %s (%s): %s", label, path, exc)
+    return hashes
+
+
+def _maybe_write_dashboard_snapshot(
+    summary: Mapping[str, Any],
+    detections: pd.DataFrame,
+    historical: pd.DataFrame,
+    detection_meta: Mapping[str, Any],
+    model_metrics: Mapping[str, Any],
+) -> None:
+    snapshot_id = detection_meta.get("run_id") or detection_meta.get("generated_at")
+    if not snapshot_id:
+        snapshot_id = f"{summary.get('total_poles')}-{len(detections)}-{len(historical)}"
+
+    if DASHBOARD_SNAPSHOT_PATH.exists():
+        try:
+            existing = json.loads(DASHBOARD_SNAPSHOT_PATH.read_text())
+            if existing.get("snapshot_id") == snapshot_id:
+                return
+        except json.JSONDecodeError:
+            pass
+
+    payload = {
+        "snapshot_id": snapshot_id,
+        "generated_at": detection_meta.get("generated_at") or datetime.utcnow().isoformat(),
+        "counts": {
+            "total_poles": summary.get("total_poles"),
+            "verified_good": summary.get("verified_good"),
+            "in_review": summary.get("in_question"),
+            "new_missing": summary.get("new_missing"),
+            "detections": len(detections),
+            "historical": len(historical),
+        },
+        "metrics": model_metrics.get("metrics"),
+        "inference": model_metrics.get("inference"),
+        "source_hashes": _snapshot_source_hashes(),
+    }
+
+    try:
+        DASHBOARD_SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        DASHBOARD_SNAPSHOT_PATH.write_text(json.dumps(payload, indent=2))
+    except OSError as exc:  # pragma: no cover - filesystem edge cases
+        logger.warning("Failed to persist dashboard snapshot at %s: %s", DASHBOARD_SNAPSHOT_PATH, exc)
 
 
 @router.get("/metrics/summary")
@@ -140,7 +250,7 @@ async def get_model_performance():
     verified_good = summary['verified_good']
 
     precision = verified_good / detections_count if detections_count else 0.0
-    recall = detections_count / len(historical) if len(historical) else 0.0
+    recall = verified_good / total_poles if total_poles else 0.0
     f1_score = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
 
     avg_time_ms = None
@@ -164,7 +274,7 @@ async def get_model_performance():
 
     crop_size = extraction_meta.get('crop_size', 256)
 
-    return {
+    model_metrics = {
         "model_name": "YOLOv8 Pole Detector",
         "model_version": "v1.0",
         "trained_date": detection_meta.get("generated_at"),
@@ -191,6 +301,44 @@ async def get_model_performance():
         "comparison": {}
     }
 
+    overrides = _load_model_metric_overrides()
+    if overrides:
+        sections: dict[str, dict] = {
+            "metrics": model_metrics["metrics"],
+            "inference": model_metrics["inference"],
+            "dataset": model_metrics["dataset"],
+            "comparison": model_metrics["comparison"],
+        }
+        alias_map = {"f1": "f1_score"}
+
+        for key, value in overrides.items():
+            normalized_key = alias_map.get(key, key)
+            applied = False
+
+            if "." in normalized_key:
+                section_name, field = normalized_key.split(".", 1)
+                section = sections.get(section_name)
+                if section is not None and field in section:
+                    section[field] = value
+                    applied = True
+                    continue
+
+            for section in sections.values():
+                if normalized_key in section:
+                    section[normalized_key] = value
+                    applied = True
+                    break
+
+            if not applied and normalized_key in model_metrics:
+                model_metrics[normalized_key] = value
+                applied = True
+
+            if not applied:
+                extras = model_metrics.setdefault("overrides", {})
+                extras[normalized_key] = value
+
+    _maybe_write_dashboard_snapshot(summary, detections, historical, detection_meta, model_metrics)
+    return model_metrics
 
 @router.get("/metrics/cost-analysis")
 async def get_cost_analysis():

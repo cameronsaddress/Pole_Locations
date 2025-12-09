@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { MapContainer, TileLayer, Popup, CircleMarker } from 'react-leaflet'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { MapContainer, TileLayer, Popup, CircleMarker, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
+import type { LatLngBounds } from 'leaflet'
 
 interface Pole {
   id: string
@@ -41,12 +42,14 @@ interface PoleDetail {
 export default function MapView() {
   const [poles, setPoles] = useState<Pole[]>([])
   const [loading, setLoading] = useState(true)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [selectedPole, setSelectedPole] = useState<PoleDetail | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [classificationFilter, setClassificationFilter] = useState<'all' | 'verified' | 'review' | 'new'>('all')
   const [minConfidence, setMinConfidence] = useState(0)
   const [recencyFilter, setRecencyFilter] = useState<'all' | 'fresh' | 'aging' | 'overdue'>('all')
   const [singleSourceOnly, setSingleSourceOnly] = useState(false)
+  const fetchControllerRef = useRef<AbortController | null>(null)
 
   const formatConfidence = (value: number | null | undefined) =>
     value != null ? `${(value * 100).toFixed(1)}%` : '—'
@@ -76,8 +79,36 @@ export default function MapView() {
   }
 
   useEffect(() => {
-    // Load all poles (limit=0 returns the full dataset including AI-only records)
-    fetch('/api/v1/maps/poles-geojson?limit=0')
+    return () => {
+      if (fetchControllerRef.current) {
+        fetchControllerRef.current.abort()
+      }
+    }
+  }, [])
+
+  const fetchPolesForBounds = useCallback((bounds: LatLngBounds, zoom: number) => {
+    const north = bounds.getNorth()
+    const south = bounds.getSouth()
+    const east = bounds.getEast()
+    const west = bounds.getWest()
+
+    const limit = zoom >= 12 ? 6000 : zoom >= 10 ? 4000 : 2500
+    const params = new URLSearchParams({
+      north: north.toString(),
+      south: south.toString(),
+      east: east.toString(),
+      west: west.toString(),
+      limit: limit.toString(),
+    })
+
+    if (fetchControllerRef.current) {
+      fetchControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    fetchControllerRef.current = controller
+
+    setLoading(true)
+    fetch(`/api/v1/maps/poles-geojson?${params.toString()}`, { signal: controller.signal })
       .then(res => res.json())
       .then(data => {
         const poleList = data.features?.map((f: any) => ({
@@ -98,13 +129,35 @@ export default function MapView() {
           surface_elev_m: f.properties.surface_elev_m ?? null,
         })) || []
         setPoles(poleList)
+        setHasLoadedOnce(true)
         setLoading(false)
       })
       .catch(err => {
-        console.error('Error loading poles:', err)
-        setLoading(false)
+        if (err.name !== 'AbortError') {
+          console.error('Error loading poles:', err)
+          setHasLoadedOnce(true)
+          setLoading(false)
+        }
       })
   }, [])
+
+  const BoundsWatcher = ({ onUpdate }: { onUpdate: (bounds: LatLngBounds, zoom: number) => void }) => {
+    const map = useMapEvents({
+      moveend: () => {
+        onUpdate(map.getBounds(), map.getZoom())
+      },
+      zoomend: () => {
+        onUpdate(map.getBounds(), map.getZoom())
+      },
+    })
+
+    useEffect(() => {
+      onUpdate(map.getBounds(), map.getZoom())
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    return null
+  }
 
   const handlePoleClick = (pole: Pole) => {
     fetch(`/api/v1/poles/${pole.id}`)
@@ -363,70 +416,64 @@ export default function MapView() {
 
         {/* Map with Satellite Imagery */}
         <div className="flex-1 relative">
-          {loading ? (
-            <div className="flex items-center justify-center h-full bg-gray-100">
-              <div className="text-center">
-                <div className="text-4xl mb-2">🗺️</div>
-                <div className="text-muted">Loading map...</div>
-              </div>
-            </div>
-          ) : (
-            <MapContainer
-              center={center}
-              zoom={13}
-              className="h-full w-full"
-              scrollWheelZoom={true}
-            >
-              {/* Satellite Imagery Layer */}
-              <TileLayer
-                attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              />
+          <MapContainer
+            center={center}
+            zoom={13}
+            className="h-full w-full"
+            scrollWheelZoom={true}
+          >
+            {/* Satellite Imagery Layer */}
+            <TileLayer
+              attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            />
 
-              {/* Optional: Street overlay for labels */}
-              <TileLayer
-                attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png"
-                opacity={0.6}
-              />
+            {/* Optional: Street overlay for labels */}
+            <TileLayer
+              attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+              url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png"
+              opacity={0.6}
+            />
 
-              {/* Pole Markers */}
-              {filteredPoles.map(pole => {
-                const isAiVerified = pole.verification_level === 'ai_only'
-                const markerColor = pole.color || '#00897B'
-                return (
-                  <CircleMarker
-                    key={pole.id}
-                    center={[pole.lat, pole.lon]}
-                    radius={isAiVerified ? 7 : 5}
-                    pathOptions={{
-                      color: markerColor,
-                      fillColor: markerColor,
-                      fillOpacity: 0.9,
-                      weight: isAiVerified ? 2 : 1
-                    }}
-                    eventHandlers={{
-                      click: () => handlePoleClick(pole)
-                    }}
-                  >
-                    <Popup>
-                      <div className="text-sm">
-                        <div className="font-semibold">{pole.id}</div>
-                        <div className="text-xs text-gray-600 mt-1">
-                          Confidence: {formatConfidence(pole.confidence)}
-                        </div>
-                        <div className="text-xs text-gray-600">
-                          Status: {pole.status}
-                        </div>
-                        <div className="text-xs text-gray-600">
-                          Verification: {getVerificationLabel(pole.verification_level)}
-                        </div>
-                        <div className="text-xs text-gray-600">
-                          NDVI: {formatNdvi(pole.ndvi)}
-                        </div>
-                        <div className="text-xs text-gray-600">
-                          Road dist: {formatDistance(pole.road_distance_m)}
-                        </div>
+            <BoundsWatcher onUpdate={fetchPolesForBounds} />
+
+            {/* Pole Markers */}
+            {filteredPoles.map(pole => {
+              const isAiVerified = pole.verification_level === 'ai_only'
+              const markerColor = pole.color || '#00897B'
+              return (
+                <CircleMarker
+                  key={pole.id}
+                  center={[pole.lat, pole.lon]}
+                  radius={isAiVerified ? 7 : 5}
+                  pathOptions={{
+                    color: markerColor,
+                    fillColor: markerColor,
+                    fillOpacity: 0.9,
+                    weight: isAiVerified ? 2 : 1
+                  }}
+                  eventHandlers={{
+                    click: () => handlePoleClick(pole)
+                  }}
+                >
+                  <Popup>
+                    <div className="text-sm">
+                      <div className="font-semibold">{pole.id}</div>
+                      <div className="text-xs text-gray-600 mt-1">
+                        Confidence: {formatConfidence(pole.confidence)}
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        Status: {pole.status}
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        Verification: {getVerificationLabel(pole.verification_level)}
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        NDVI: {formatNdvi(pole.ndvi)}
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        Road dist: {formatDistance(pole.road_distance_m)}
+                      </div>
                         <div className="text-xs text-gray-600">
                           Surface elev: {formatHeight(pole.surface_elev_m)}
                         </div>
@@ -444,7 +491,18 @@ export default function MapView() {
                   </CircleMarker>
                 )
               })}
-            </MapContainer>
+          </MapContainer>
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="bg-white/90 px-4 py-3 rounded shadow text-sm text-muted">
+                Loading map…
+              </div>
+            </div>
+          )}
+          {loading && hasLoadedOnce && (
+            <div className="absolute top-4 right-4 bg-white/90 text-xs text-muted px-3 py-1 rounded shadow">
+              Refreshing map view…
+            </div>
           )}
         </div>
       </div>

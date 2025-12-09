@@ -50,15 +50,48 @@ class MultiSourceValidator:
         print("=" * 80)
         print("\n📥 Loading data sources...\n")
 
-        # Source 1: OSM Poles (1,977 poles in Harrisburg)
+        # Source 1: OSM Poles (multi-county inventories)
         osm_file = RAW_DATA_DIR / 'osm_poles_harrisburg_real.csv'
+        multi_dir = RAW_DATA_DIR / 'osm_poles_multi'
+        osm_frames = []
+
+        if multi_dir.exists():
+            for csv_path in sorted(multi_dir.glob("*.csv")):
+                try:
+                    df = pd.read_csv(csv_path)
+                except Exception as exc:  # pragma: no cover - defensive
+                    print(f"⚠️  Failed to read {csv_path}: {exc}")
+                    continue
+                if "source" not in df.columns:
+                    df["source"] = "osm"
+                else:
+                    df["source"] = df["source"].fillna("osm")
+                if "inspection_date" not in df.columns:
+                    df["inspection_date"] = "2024-01-01"
+                osm_frames.append(df)
+
         if osm_file.exists():
-            self.osm_poles = pd.read_csv(osm_file)
-            self.osm_poles['source'] = 'osm'
-            self.osm_poles['source_date'] = datetime(2024, 10, 1)  # Approximate OSM data date
-            print(f"✅ OSM Poles: {len(self.osm_poles)} poles (Harrisburg, PA)")
+            df = pd.read_csv(osm_file)
+            if "source" not in df.columns:
+                df["source"] = "osm"
+            else:
+                df["source"] = df["source"].fillna("osm")
+            if "inspection_date" not in df.columns:
+                df["inspection_date"] = "2024-01-01"
+            osm_frames.append(df)
+
+        if osm_frames:
+            combined_osm = pd.concat(osm_frames, ignore_index=True)
+            if "pole_id" in combined_osm.columns:
+                before = len(combined_osm)
+                combined_osm = combined_osm.drop_duplicates(subset=["pole_id"])
+                if len(combined_osm) < before:
+                    print(f"ℹ️  Dropped {before - len(combined_osm)} duplicate pole_id rows across OSM exports")
+            combined_osm['source_date'] = datetime(2024, 10, 1)  # Approximate OSM data date
+            self.osm_poles = combined_osm
+            print(f"✅ OSM Poles: {len(self.osm_poles)} records across {multi_dir if multi_dir.exists() else 'single export'}")
         else:
-            print(f"❌ OSM poles not found at {osm_file}")
+            print("❌ No OSM pole inventories found – run sync_multi_source_data.py first.")
 
         # Source 2: AI Detections (real YOLO inference results)
         detections_file = PROCESSED_DATA_DIR / 'ai_detections.csv'

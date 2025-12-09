@@ -1,16 +1,17 @@
 """
-Prepare YOLOv8 dataset by splitting into train/val sets
-Organizes real pole crops for model training
+Prepare YOLOv8 dataset by splitting into train/val sets.
+Organizes real pole crops for model training.
 """
+import argparse
 import json
-import shutil
-from pathlib import Path
 import logging
-import sys
 import random
+import shutil
+import sys
+from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
-from config import PROCESSED_DATA_DIR
+from config import PROCESSED_DATA_DIR  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -163,7 +164,28 @@ resolution: {resolution_line}
 
 
 if __name__ == "__main__":
-    dataset_dir = PROCESSED_DATA_DIR / 'pole_training_dataset'
+    parser = argparse.ArgumentParser(description="Split YOLO dataset into train/val folders.")
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=PROCESSED_DATA_DIR / "pole_training_dataset",
+        help="Path to dataset directory containing images/ and labels/ subfolders.",
+    )
+    parser.add_argument(
+        "--train-split",
+        type=float,
+        default=0.8,
+        help="Fraction of images to allocate to the training set.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible shuffling.",
+    )
+    args = parser.parse_args()
+
+    dataset_dir = args.dataset
 
     if not dataset_dir.exists():
         logger.error(f"Dataset directory not found: {dataset_dir}")
@@ -173,7 +195,11 @@ if __name__ == "__main__":
     logger.info("Preparing REAL pole dataset for YOLOv8 training...")
     logger.info("NO SYNTHETIC DATA!\n")
 
-    stats = prepare_dataset(dataset_dir)
+    stats = prepare_dataset(
+        dataset_dir=dataset_dir,
+        train_split=args.train_split,
+        seed=args.seed,
+    )
 
     if stats['total'] > 0:
         logger.info(f"\n✅ SUCCESS: Dataset ready for training!")

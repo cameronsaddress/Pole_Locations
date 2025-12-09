@@ -1,0 +1,31 @@
+{
+  "snapshot_id": "2025-10-25",
+  "generated_at": "2025-10-25",
+  "counts": {
+    "total_poles": 21250,
+    "verified_good": 19547,
+    "in_review": 1,
+    "new_missing": 1702,
+    "detections": 21250,
+    "historical": 1977
+  },
+  "metrics": {
+    "precision": 0.9254879612,
+    "recall": 0.9254879612,
+    "map50": 0.9254879612,
+    "map50_95": 0.9254879612,
+    "f1_score": 0.9254879612
+  },
+  "inference": {
+    "avg_inference_time_ms": 63.82014337933951,
+    "throughput_fps": 15.66903405490828,
+    "device": "Not Specified"
+  },
+  "source_hashes": {
+    "summary_metrics.json": "1bcef79141b43df20f0f3ffbb168daf47d30bd64f50c0a4777438516162da433",
+    "ai_detections.csv": "c816fb27df89039217eef45f0eae69c2b46b81ec8bd826fc1a1c785729d04dae",
+    "ai_detections_metadata.json": "169ea0593de727a99bc7eeec446ed1c4062a32f557cedd07e698c9bbdb514cd9",
+    "osm_poles.csv": "7334dbe8eb8992569d924c32892fb060c669726f7f1a1ff294d901464a0705a3",
+    "verified_poles.csv": "70d71a0ffe87f01fbd230f559df859909d3a9cd2d832f80923f0c5b017a94f7f"
+  }
+}

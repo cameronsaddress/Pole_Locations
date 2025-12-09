@@ -1,0 +1,18 @@
+# Utility Pole Detection Dataset (REAL DATA)
+# Source: OSM poles + NAIP imagery
+# Location: Harrisburg, PA
+# Resolution: ~0.600m/pixel
+
+path: /workspace/data/processed/pole_training_dataset_v5_split
+train: train/images
+val: val/images
+
+nc: 1  # Number of classes
+names: ['utility_pole']
+
+# Dataset stats
+total_images: 3864
+train_images: 3284
+val_images: 580
+crop_size: 512
+resolution: 0.600m/pixel

@@ -7,7 +7,8 @@ import logging
 from ast import literal_eval
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
+from io import BytesIO
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,8 @@ from config import RAW_DATA_DIR, PROCESSED_DATA_DIR  # noqa: E402
 
 DETECTIONS_META_PATH = PROCESSED_DATA_DIR / 'ai_detections_metadata.json'
 DETECTIONS_PATH = PROCESSED_DATA_DIR / 'ai_detections.csv'
+NAIP_TILE_DIR = PROCESSED_DATA_DIR.parent / 'imagery' / 'naip_tiles'
+ESRI_EXPORT_URL = "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export"
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,32 @@ router = APIRouter()
 
 _DETECTIONS_CACHE = None
 _DETECTIONS_CACHE_MTIME = None
+_POLE_COORD_CACHE: Dict[str, Optional[Tuple[float, float]]] = {}
+_TILE_METADATA: Optional[List[Dict[str, object]]] = None
+
+
+def _safe_float(value):
+    """Convert to float if finite, else return None."""
+    if value is None:
+        return None
+    try:
+        fval = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(fval) or not np.isfinite(fval):
+        return None
+    return fval
+
+
+def _safe_str(value, default: Optional[str] = None) -> Optional[str]:
+    if value is None:
+        return default
+    if isinstance(value, float) and pd.isna(value):
+        return default
+    value = str(value)
+    if not value or value.lower() == 'nan':
+        return default
+    return value
 
 
 def _get_detection_dataframe() -> Optional[pd.DataFrame]:
@@ -70,6 +99,90 @@ def _lookup_detection_row(pole_id: str) -> Optional[pd.Series]:
         return match.iloc[0]
 
     return None
+
+
+def _load_tile_metadata() -> List[Dict[str, object]]:
+    """Cache NAIP tile bounds in WGS84 for fast lookup."""
+    global _TILE_METADATA
+
+    if _TILE_METADATA is not None:
+        return _TILE_METADATA
+
+    tile_info: List[Dict[str, object]] = []
+    if not NAIP_TILE_DIR.exists():
+        _TILE_METADATA = tile_info
+        return tile_info
+
+    try:
+        import rasterio
+        from rasterio.warp import transform_bounds
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Rasterio unavailable for tile metadata: %s", exc)
+        _TILE_METADATA = tile_info
+        return tile_info
+
+    for tif in sorted(NAIP_TILE_DIR.glob("*.tif")):
+        try:
+            with rasterio.open(tif) as src:
+                bounds = src.bounds
+                crs = src.crs or "EPSG:4326"
+                if crs and crs.to_string() != "EPSG:4326":
+                    minx, miny, maxx, maxy = transform_bounds(
+                        crs, "EPSG:4326", bounds.left, bounds.bottom, bounds.right, bounds.top
+                    )
+                else:
+                    minx, miny, maxx, maxy = bounds.left, bounds.bottom, bounds.right, bounds.top
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to read NAIP tile %s: %s", tif, exc)
+            continue
+
+        tile_info.append(
+            {
+                "path": tif,
+                "bounds": (minx, miny, maxx, maxy),
+            }
+        )
+
+    _TILE_METADATA = tile_info
+    return tile_info
+
+
+def _get_pole_coordinates(pole_id: str) -> Optional[Tuple[float, float]]:
+    """Return (lat, lon) for the requested pole using cached lookups."""
+    if pole_id in _POLE_COORD_CACHE:
+        return _POLE_COORD_CACHE[pole_id]
+
+    lat_lon: Optional[Tuple[float, float]] = None
+
+    verified_path = PROCESSED_DATA_DIR / "verified_poles_multi_source.csv"
+    if verified_path.exists() and lat_lon is None:
+        try:
+            verified_df = pd.read_csv(verified_path)
+            row = verified_df[verified_df["pole_id"] == pole_id]
+            if not row.empty:
+                lat = row.iloc[0].get("lat")
+                lon = row.iloc[0].get("lon")
+                if lat is not None and lon is not None and np.isfinite(lat) and np.isfinite(lon):
+                    lat_lon = (float(lat), float(lon))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to read verified coordinates: %s", exc)
+
+    if lat_lon is None:
+        poles_csv = RAW_DATA_DIR / "osm_poles_harrisburg_real.csv"
+        if poles_csv.exists():
+            try:
+                base_df = pd.read_csv(poles_csv)
+                row = base_df[base_df["pole_id"] == pole_id]
+                if not row.empty:
+                    lat = row.iloc[0].get("lat")
+                    lon = row.iloc[0].get("lon")
+                    if lat is not None and lon is not None and np.isfinite(lat) and np.isfinite(lon):
+                        lat_lon = (float(lat), float(lon))
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to read base coordinates: %s", exc)
+
+    _POLE_COORD_CACHE[pole_id] = lat_lon
+    return lat_lon
 
 
 def _build_ai_detection_image(pole_id: str):
@@ -157,6 +270,116 @@ def _build_ai_detection_image(pole_id: str):
         draw.text((rel[0] + 4, label_top + 2), "POLE", fill="white")
 
     return img
+
+
+def _draw_crosshair(img, cx: int, cy: int, radius: Optional[int] = None):
+    from PIL import ImageDraw
+
+    width, height = img.size
+    marker_radius = radius or max(4, min(width, height) // 15)
+    draw = ImageDraw.Draw(img)
+    draw.ellipse(
+        [
+            max(0, cx - marker_radius),
+            max(0, cy - marker_radius),
+            min(width, cx + marker_radius),
+            min(height, cy + marker_radius),
+        ],
+        outline="#CD040B",
+        width=3,
+    )
+    draw.line([(cx, max(0, cy - marker_radius * 2)), (cx, min(height, cy + marker_radius * 2))], fill="#CD040B", width=2)
+    draw.line([(max(0, cx - marker_radius * 2), cy), (min(width, cx + marker_radius * 2), cy)], fill="#CD040B", width=2)
+    label_x = min(width - 40, max(0, cx + marker_radius + 4))
+    label_y = max(0, cy - marker_radius - 14)
+    draw.text((label_x, label_y), "POLE", fill="#CD040B")
+    return img
+
+
+def _build_inventory_image(pole_id: str):
+    """Render a location crop using NAIP tiles for historical/inventory poles."""
+    coords = _get_pole_coordinates(pole_id)
+    if coords is None:
+        return None
+
+    lat, lon = coords
+    tile_metadata = _load_tile_metadata()
+    candidate = None
+    for meta in tile_metadata:
+        minx, miny, maxx, maxy = meta["bounds"]
+        if minx <= lon <= maxx and miny <= lat <= maxy:
+            candidate = meta["path"]
+            break
+
+    if candidate is not None:
+        try:
+            import rasterio
+            from rasterio.windows import Window
+            from rasterio.warp import transform
+            from PIL import Image
+            import numpy as np
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Missing dependencies to render inventory image: %s", exc)
+        else:
+            try:
+                with rasterio.open(candidate) as src:
+                    if src.crs and src.crs.to_string() != "EPSG:4326":
+                        x, y = transform("EPSG:4326", src.crs, [lon], [lat])
+                        x, y = x[0], y[0]
+                    else:
+                        x, y = lon, lat
+
+                    row, col = src.index(x, y)
+
+                    crop_size = 256
+                    half = crop_size // 2
+                    width, height = src.width, src.height
+                    col_off = max(0, int(round(col)) - half)
+                    row_off = max(0, int(round(row)) - half)
+                    if col_off + crop_size > width:
+                        col_off = max(0, width - crop_size)
+                    if row_off + crop_size > height:
+                        row_off = max(0, height - crop_size)
+                    win_width = min(crop_size, width - col_off)
+                    win_height = min(crop_size, height - row_off)
+                    if win_width > 0 and win_height > 0:
+                        window = Window(col_off, row_off, win_width, win_height)
+                        data = src.read([1, 2, 3], window=window)
+                        if data.size:
+                            image = np.transpose(data, (1, 2, 0))
+                            if image.dtype != np.uint8:
+                                image = np.clip(image, 0, 255).astype(np.uint8)
+                            img = Image.fromarray(image)
+                            cx = int(round(col)) - col_off
+                            cy = int(round(row)) - row_off
+                            return _draw_crosshair(img, cx, cy, radius=max(4, win_width // 15))
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to read inventory raster for %s: %s", pole_id, exc)
+
+    # If NAIP imagery not available, fall back to live basemap capture
+    try:
+        import requests
+        from PIL import Image
+
+        delta = 0.0009
+        bbox = (lon - delta, lat - delta, lon + delta, lat + delta)
+        params = {
+            "bbox": ",".join(map(str, bbox)),
+            "bboxSR": "4326",
+            "imageSR": "3857",
+            "size": "512,512",
+            "format": "png32",
+            "f": "image",
+        }
+        resp = requests.get(ESRI_EXPORT_URL, params=params, timeout=10)
+        resp.raise_for_status()
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        cx = img.width // 2
+        cy = img.height // 2
+        return _draw_crosshair(img, cx, cy)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to fetch basemap tile for %s: %s", pole_id, exc)
+        return None
 
 
 def _load_verified_dataframe() -> pd.DataFrame:
@@ -284,22 +507,22 @@ async def get_poles(
 
         poles_list.append({
             "id": row['pole_id'],
-            "lat": float(row['lat']),
-            "lon": float(row['lon']),
-            "confidence": float(row['confidence']) if row['confidence'] is not None else None,
+            "lat": _safe_float(row['lat']),
+            "lon": _safe_float(row['lon']),
+            "confidence": _safe_float(row['confidence']),
             "status": row['status'],
             "pole_type": row.get('pole_type', 'tower'),
             "state": row.get('state', 'PA'),
             "classification": row.get('classification'),
-            "recency_score": recency_score if pd.notna(recency_score) else None,
+            "recency_score": _safe_float(recency_score),
             "num_sources": int(num_sources) if pd.notna(num_sources) else None,
             "inspection_date": inspection_date if isinstance(inspection_date, str) else None,
             "verification_level": verification_level,
             "sources": sources,
             "review_reasons": review_reasons,
-            "ndvi": row.get('ndvi') if 'ndvi' in row else None,
-            "road_distance_m": float(row['road_distance_m']) if 'road_distance_m' in row and pd.notna(row['road_distance_m']) else None,
-            "surface_elev_m": float(row['surface_elev_m']) if 'surface_elev_m' in row and pd.notna(row['surface_elev_m']) else None
+            "ndvi": _safe_float(row.get('ndvi')),
+            "road_distance_m": _safe_float(row.get('road_distance_m')),
+            "surface_elev_m": _safe_float(row.get('surface_elev_m'))
         })
 
     return {
@@ -402,38 +625,38 @@ async def get_pole_detail(pole_id: str):
         road_distance_value = detection_road_distance
         surface_elev_value = detection_surface_elev
 
-    # Check if image exists
+    # Determine whether an image endpoint should be available
     image_path = PROCESSED_DATA_DIR / 'pole_training_dataset' / 'images' / f"{pole_id}.png"
-    has_image = image_path.exists()
+    has_image = image_path.exists() or _lookup_detection_row(pole_id) is not None or _get_pole_coordinates(pole_id) is not None
 
     return {
         "id": pole_data['pole_id'],
-        "lat": float(pole_data['lat']),
-        "lon": float(pole_data['lon']),
-        "confidence": detection_conf,
+        "lat": _safe_float(pole_data.get('lat')),
+        "lon": _safe_float(pole_data.get('lon')),
+        "confidence": _safe_float(detection_conf),
         "status": status,
-        "recency_score": float(recency_score) if recency_score is not None and not pd.isna(recency_score) else None,
+        "recency_score": _safe_float(recency_score),
         "num_sources": int(num_sources) if num_sources is not None and not pd.isna(num_sources) else None,
-        "inspection_date": inspection_date if isinstance(inspection_date, str) else None,
-        "spatial_distance_m": float(spatial_distance) if spatial_distance is not None and not pd.isna(spatial_distance) else None,
-        "combined_confidence": float(combined_confidence) if combined_confidence is not None and not pd.isna(combined_confidence) else None,
-        "pole_type": pole_data.get('pole_type', 'tower'),
-        "state": pole_data.get('state', 'PA'),
+        "inspection_date": _safe_str(inspection_date),
+        "spatial_distance_m": _safe_float(spatial_distance),
+        "combined_confidence": _safe_float(combined_confidence),
+        "pole_type": _safe_str(pole_data.get('pole_type'), 'tower'),
+        "state": _safe_str(pole_data.get('state'), 'PA'),
         "source": "OpenStreetMap",
         "has_image": has_image,
         "image_url": f"/api/v1/poles/{pole_id}/image" if has_image else None,
         "verification_level": verification_level,
         "metadata": {
-            "operator": pole_data.get('operator', 'Unknown'),
-            "voltage": pole_data.get('voltage', 'Unknown'),
-            "material": pole_data.get('material', 'Unknown'),
-            "height": pole_data.get('height', 'Unknown'),
-            "detection_source_date": detection_source_date
+            "operator": _safe_str(pole_data.get('operator'), 'Unknown'),
+            "voltage": _safe_str(pole_data.get('voltage'), 'Unknown'),
+            "material": _safe_str(pole_data.get('material'), 'Unknown'),
+            "height": _safe_str(pole_data.get('height'), 'Unknown'),
+            "detection_source_date": _safe_str(detection_source_date)
         },
         "sources": sources,
-        "ndvi": ndvi_value if ndvi_value is not None and not pd.isna(ndvi_value) else None,
-        "road_distance_m": float(road_distance_value) if road_distance_value is not None and not pd.isna(road_distance_value) else None,
-        "surface_elev_m": float(surface_elev_value) if surface_elev_value is not None and not pd.isna(surface_elev_value) else None
+        "ndvi": _safe_float(ndvi_value),
+        "road_distance_m": _safe_float(road_distance_value),
+        "surface_elev_m": _safe_float(surface_elev_value)
     }
 
 @router.post("/poles/bulk-approve")
@@ -459,6 +682,9 @@ async def get_pole_image(pole_id: str):
 
     # Attempt to build image from AI detection metadata (for AI-only poles)
     detection_img = _build_ai_detection_image(pole_id)
+    if detection_img is None:
+        detection_img = _build_inventory_image(pole_id)
+
     if detection_img is None:
         image_dir = PROCESSED_DATA_DIR / 'pole_training_dataset' / 'images'
 

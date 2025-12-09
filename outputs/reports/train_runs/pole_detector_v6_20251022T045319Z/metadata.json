@@ -1,0 +1,15 @@
+{
+  "run_id": "pole_detector_v6_20251022T045319Z",
+  "model": "yolov8m.pt",
+  "epochs": 220,
+  "batch_size": 16,
+  "img_size": 640,
+  "metrics": {
+    "map50": 0.8509499185432879,
+    "map50_95": 0.7758810587597641,
+    "precision": 0.7847520681434782,
+    "recall": 0.8633405639913232
+  },
+  "weights": "/workspace/models/pole_detector_v6/weights/best.pt",
+  "dataset_yaml": "dataset_v5_split.yaml"
+}
