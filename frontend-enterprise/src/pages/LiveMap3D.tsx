@@ -638,7 +638,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                                         style={{ border: 0 }}
                                         loading="lazy"
                                         allowFullScreen
-                                        src={`https://maps.google.com/maps?layer=c&cbll=${expandedPole.lat},${expandedPole.lng}&source=embed&output=svembed`}
+                                        src={`https://maps.google.com/maps?q=${expandedPole.lat},${expandedPole.lng}&layer=c&cbll=${expandedPole.lat},${expandedPole.lng}&source=embed&output=svembed`}
                                     />
                                 </div>
                             </div>
