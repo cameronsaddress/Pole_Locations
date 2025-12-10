@@ -101,6 +101,10 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
     // State for multiple active detections
     const [activePoles, setActivePoles] = useState<Asset[]>([])
     const [expandedPoleId, setExpandedPoleId] = useState<string | null>(null) // Track expanded
+
+    // Derived selected pole
+    const expandedPole = activePoles.find(p => p.id === expandedPoleId)
+
     const markersRef = useRef<Map<string, { marker: maplibregl.Marker, root: any }>>(new Map())
 
     // Animation Refs
@@ -484,7 +488,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
             {/* EXPANDED MODAL (Hoisted out of Map DOM) */}
             {expandedPole && (
-                 <div 
+                <div
                     className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-300"
                     onClick={(e) => {
                         e.stopPropagation()
@@ -492,13 +496,13 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                         isRotatingRef.current = true
                     }}
                 >
-                    <div 
+                    <div
                         className="relative w-[900px] h-[500px] bg-black border border-emerald-500/50 rounded-xl shadow-2xl overflow-hidden flex animate-in zoom-in-95 duration-300"
-                        onClick={(e) => e.stopPropagation()} 
+                        onClick={(e) => e.stopPropagation()}
                     >
-                         {/* LEFT: IMAGE (60%) */}
+                        {/* LEFT: IMAGE (60%) */}
                         <div className="w-[60%] h-full relative bg-neutral-900 overflow-hidden border-r border-white/10">
-                            <div 
+                            <div
                                 className="w-full h-full bg-cover bg-center transition-transform duration-700 hover:scale-105"
                                 style={{
                                     backgroundImage: `url(${getStaticMapUrl(expandedPole.lat, expandedPole.lng, 600, 500)})`,
@@ -518,9 +522,9 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
                         {/* RIGHT: DATA (40%) */}
                         <div className="w-[40%] h-full bg-gradient-to-br from-gray-900 to-black p-8 flex flex-col justify-between">
-                             {/* Close */}
-                             <button 
-                                onClick={(e) => { 
+                            {/* Close */}
+                            <button
+                                onClick={(e) => {
                                     e.stopPropagation()
                                     setExpandedPoleId(null)
                                     isRotatingRef.current = true
@@ -550,7 +554,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                                             <span className="text-2xl font-bold text-emerald-400">{(expandedPole.confidence * 100).toFixed(0)}%</span>
                                         </div>
                                     </div>
-                                    
+
                                     <div>
                                         <div className="text-xs font-mono text-gray-500 mb-1">STATUS</div>
                                         <span className="inline-block px-3 py-1 bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 rounded text-sm font-bold tracking-wider">
@@ -560,7 +564,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                                 </div>
                             </div>
 
-                            <Button 
+                            <Button
                                 className="w-full h-12 bg-white text-black hover:bg-gray-200 font-bold tracking-widest text-sm rounded-sm transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)]"
                                 onClick={() => window.open(`https://www.google.com/maps?q&layer=c&cbll=${expandedPole.lat},${expandedPole.lng}`, '_blank')}
                             >
