@@ -27,11 +27,10 @@ const getTileUrl = (lat: number, lng: number, zoom: number) => {
 // ----------------------------------------------------------------------------
 const PoleMarker = ({ pole }: { pole: Asset }) => {
     return (
-        <div className="flex flex-col items-center pointer-events-none transform -translate-y-[60px]"> {/* 50ft Elevation */}
-
-            {/* 1. THE FLOATING CARD - Compact & Elite */}
-            <div className="animate-in fade-in zoom-in slide-in-from-bottom-10 duration-700 mb-2 group perspective-1000">
-                <Card className="w-[180px] backdrop-blur-3xl bg-black/80 border border-emerald-500/30 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-sm overflow-hidden pointer-events-auto transition-transform duration-500 hover:scale-105">
+        <div className="flex flex-col items-center pointer-events-none origin-bottom animate-in zoom-in-50 duration-500">
+            {/* 1. THE FLOATING CARD - Spawns upwards */}
+            <div className="animate-in slide-in-from-bottom-10 fade-in duration-700 ease-out group perspective-1000 origin-bottom">
+                <Card className="w-[180px] backdrop-blur-3xl bg-black/80 border border-emerald-500/30 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-sm overflow-hidden pointer-events-auto transition-transform duration-500 hover:scale-110">
 
                     {/* Header */}
                     <div className="px-2 py-1.5 border-b border-white/5 flex justify-between items-center bg-gradient-to-r from-emerald-900/20 to-transparent">
@@ -63,14 +62,14 @@ const PoleMarker = ({ pole }: { pole: Asset }) => {
                 </Card>
             </div>
 
-            {/* 2. THE TETHER LINE - Green Laser */}
-            <div className="h-[50px] w-[2px] bg-gradient-to-b from-emerald-400 via-emerald-500/30 to-transparent shadow-[0_0_10px_#10b981]"></div>
+            {/* 2. THE TETHER LINE - Connects Card to Dot - Grows up */}
+            <div className="h-[80px] w-[2px] bg-gradient-to-b from-emerald-400 via-emerald-500/30 to-transparent shadow-[0_0_10px_#10b981] animate-in zoom-in-y duration-700 origin-bottom"></div>
 
-            {/* 3. THE GROUND DOT - "Green Pulse" */}
-            <div className="relative -mt-1">
-                <div className="absolute -inset-[30px] border border-emerald-500/20 rounded-full animate-[ping_2s_infinite]"></div>
-                <div className="absolute -inset-[15px] border border-emerald-500/40 rounded-full animate-[ping_1.5s_infinite_delay-100ms]"></div>
-                <div className="w-3 h-3 bg-emerald-400 rounded-full shadow-[0_0_25px_#34d399] relative z-20 ring-2 ring-black"></div>
+            {/* 3. THE GROUND DOT - 3D Green Sphere */}
+            <div className="relative flex items-center justify-center w-8 h-8">
+                 <div className="absolute inset-0 border border-emerald-500/30 rounded-full animate-[ping_2s_infinite]"></div>
+                 {/* 3D Pearl */}
+                 <div className="w-4 h-4 rounded-full bg-[radial-gradient(circle_at_30%_30%,_#4ade80,_#059669)] shadow-[0_0_20px_#22c55e] relative z-20 ring-1 ring-black/50"></div>
             </div>
 
         </div>
@@ -80,12 +79,14 @@ const PoleMarker = ({ pole }: { pole: Asset }) => {
 export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' }) {
     const mapContainer = useRef<HTMLDivElement>(null)
     const map = useRef<maplibregl.Map | null>(null)
+
     // State for multiple active detections
     const [activePoles, setActivePoles] = useState<Asset[]>([])
     const markersRef = useRef<Map<string, { marker: maplibregl.Marker, root: any }>>(new Map())
 
-    // Animation Ref to solve closure staleness
+    // Animation Refs
     const isRotatingRef = useRef(true)
+    const isInteractingRef = useRef(false) // Track user interaction to pause rotation
 
     const [assets, setAssets] = useState<Asset[]>([])
     const [isRotating, setIsRotating] = useState(true)
@@ -133,6 +134,20 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
             // @ts-ignore
             antialias: true
         })
+
+        // Interaction Handlers for Fluid Drag
+        const handleInteractStart = () => { isInteractingRef.current = true }
+        const handleInteractEnd = () => { isInteractingRef.current = false }
+
+        map.current.on('mousedown', handleInteractStart)
+        map.current.on('touchstart', handleInteractStart)
+        map.current.on('dragstart', handleInteractStart)
+
+        map.current.on('mouseup', handleInteractEnd)
+        map.current.on('touchend', handleInteractEnd)
+        map.current.on('dragend', handleInteractEnd)
+        map.current.on('moveend', handleInteractEnd)
+
 
         // On Load Sequence
         map.current.on('load', async () => {
@@ -185,6 +200,43 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                     'circle-stroke-width': 1,
                     'circle-stroke-color': '#000000'
                 }
+            })
+
+            // ---------------------------------------------------------
+            // INTERACTION: CLICK TO INSPECT
+            // ---------------------------------------------------------
+            map.current.on('mouseenter', 'assets-glow', () => {
+                if (map.current) map.current.getCanvas().style.cursor = 'pointer'
+            })
+            map.current.on('mouseleave', 'assets-glow', () => {
+                if (map.current) map.current.getCanvas().style.cursor = ''
+            })
+
+            map.current.on('click', 'assets-glow', (e) => {
+                const feature = e.features?.[0]
+                if (!feature) return
+
+                const props = feature.properties
+                // @ts-ignore
+                const [lng, lat] = feature.geometry.coordinates
+
+                const clickedPole: Asset = {
+                    id: props?.id,
+                    lat: lat,
+                    lng: lng,
+                    status: props?.status,
+                    confidence: props?.confidence
+                }
+
+                setActivePoles(prev => {
+                    // If already active, don't duplicate
+                    if (prev.find(p => p.id === clickedPole.id)) return prev
+
+                    // Add new, cycle out oldest if > 3
+                    const temp = [...prev, clickedPole]
+                    if (temp.length > 3) temp.shift()
+                    return temp
+                })
             })
 
             // Context Layers
@@ -275,8 +327,8 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
         // Animation Loop for Rotation
         const rotate = () => {
-            // Only rotate if enabled AND map is active
-            if (isRotatingRef.current && map.current) {
+            // Only rotate if enabled AND map is active AND user is not interacting
+            if (isRotatingRef.current && !isInteractingRef.current && map.current) {
                 map.current.setBearing(map.current.getBearing() + 0.04) // 2x Faster Rotation
             }
             requestAnimationFrame(rotate)
@@ -320,11 +372,14 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
         const cycle = setInterval(() => {
             if (!map.current) return
 
-            // Smart Scan (Visible Bottom)
+            // Smart Scan (Visible Bottom CENTER)
             const { width, height } = map.current.getCanvas()
             const visible = assets.filter(a => {
-                const p = map.current!.project([a.lng, a.lat])
-                return p.x >= 0 && p.x <= width && p.y >= height * 0.4 && p.y <= height
+                 const p = map.current!.project([a.lng, a.lat])
+                 return (
+                    p.x >= width * 0.3 && p.x <= width * 0.7 && // Center 40% (Stay in frame long time)
+                    p.y >= height * 0.4 && p.y <= height // Bottom section
+                 )
             })
 
             if (visible.length > 0) {
