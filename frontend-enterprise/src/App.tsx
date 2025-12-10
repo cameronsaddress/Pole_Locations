@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard"
 import LiveMap3D from "./pages/LiveMap3D"
 import DataAssets from "./pages/DataAssets"
 import Training from "./pages/Training"
+import Settings from "./pages/Settings"
 
 const queryClient = new QueryClient()
 
@@ -18,7 +19,7 @@ function App() {
             <Route path="map" element={<LiveMap3D />} />
             <Route path="data" element={<DataAssets />} />
             <Route path="training" element={<Training />} />
-            <Route path="settings" element={<div className="p-4 text-center text-muted-foreground">Settings Component Placeholder</div>} />
+            <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>
       </BrowserRouter>

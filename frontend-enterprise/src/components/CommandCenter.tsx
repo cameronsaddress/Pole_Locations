@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Activity, Database, Disc, Zap, AlertTriangle } from 'lucide-react'
-import LiveMap3D from '../pages/LiveMap3D' // Using LiveMap3D logic for modal
+
 
 interface OpsMetrics {
     total_assets: number
@@ -37,6 +37,16 @@ export default function CommandCenter() {
     const [scanProgress, setScanProgress] = useState(0)
 
     const [isExpanded, setIsExpanded] = useState(false) // If user clicks feed to expand
+
+    // Dispatch Logic
+    const [dispatchStep, setDispatchStep] = useState(0) // 0=idle, 1=loading, 2=done
+
+    const startDispatch = () => {
+        setDispatchStep(1)
+        setTimeout(() => {
+            setDispatchStep(2)
+        }, 2000)
+    }
 
     // 1. Fetch Operations Data
     useEffect(() => {
@@ -90,26 +100,137 @@ export default function CommandCenter() {
     return (
         <div className="w-full h-full bg-black/40 backdrop-blur-sm border border-white/10 rounded-xl overflow-hidden flex flex-col md:flex-row shadow-2xl relative">
 
-            {/* EXPANDED MODAL OVERLAY (When clicked) */}
-            <AnimatePresence>
-                {isExpanded && (
-                    <div className="absolute inset-0 z-50 bg-black">
-                        {/* We can temporarily mount a widget mode map specifically for this asset, or just a detailed view */}
-                        <div className="relative w-full h-full">
-                            <LiveMap3D mode="widget" />
-                            <button
-                                onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}
-                                className="absolute top-4 right-4 z-[60] bg-black/80 text-white border border-white/20 px-4 py-2 rounded hover:bg-white/20"
-                            >
-                                CLOSE FEED
-                            </button>
-                            {/* Force open specific pole? We might need to pass a prop to LiveMap or context. 
-                                    For now the widget defaults to the region. 
-                                    Ideally LiveMap accepts "initialPoleId" */}
+            {isExpanded && (
+                <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col p-8">
+                    {/* HEADER */}
+                    <div className="flex items-center justify-between mb-8 border-b border-white/10 pb-4">
+                        <div>
+                            <h2 className="text-2xl font-black text-white tracking-widest uppercase flex items-center gap-3">
+                                <AlertTriangle className="text-red-500 w-8 h-8" />
+                                INCIDENT COMMAND: {currentLock.id}
+                            </h2>
+                            <p className="text-emerald-500 font-mono text-xs mt-1">
+                                SECURE UPLINK ESTABLISHED
+                            </p>
+                        </div>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setIsExpanded(false); setDispatchStep(0); }}
+                            className="bg-transparent border border-white/20 text-white hover:bg-white/10 px-6 py-2 rounded uppercase text-xs font-bold tracking-widest transition-colors"
+                        >
+                            ABORT / CLOSE
+                        </button>
+                    </div>
+
+                    {/* CONTENT GRID */}
+                    <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-8 overflow-hidden">
+                        {/* LEFT: VISUAL */}
+                        <div className="relative rounded-lg overflow-hidden border border-emerald-500/30">
+                            <img
+                                src={getStaticMapUrl(currentLock.lat, currentLock.lng, 800, 600)}
+                                className="w-full h-full object-cover filter contrast-125 grayscale-[0.2]"
+                            />
+                            <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0)_50%,rgba(16,185,129,0.1)_50%),linear-gradient(90deg,rgba(16,185,129,0.1)_50%,rgba(0,0,0,0)_50%)] bg-[size:4px_4px] pointer-events-none opacity-20" />
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/80 p-4 border-t border-emerald-500/50">
+                                <div className="flex justify-between items-end">
+                                    <div>
+                                        <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">AI CONFIDENCE</div>
+                                        <div className="text-3xl font-black text-emerald-400">{(currentLock.confidence * 100).toFixed(1)}%</div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">DEFECT TYPE</div>
+                                        <div className="text-xl font-bold text-red-500 flex items-center justify-end gap-2">
+                                            {currentLock.issues[0]?.toUpperCase() || "UNKNOWN"}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* RIGHT: ACTION PANEL */}
+                        <div className="flex flex-col gap-6">
+                            {/* RISK ANALYSIS WIDGET */}
+                            <div className="bg-white/5 border border-white/10 p-6 rounded-lg relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/20 blur-3xl rounded-full translate-x-10 -translate-y-10" />
+
+                                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">PREDICTIVE RISK ANALYSIS</h3>
+
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center text-sm border-b border-white/5 pb-2">
+                                        <span className="text-gray-300">Failure Probability (1yr)</span>
+                                        <span className="text-red-400 font-mono font-bold">87.4%</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-sm border-b border-white/5 pb-2">
+                                        <span className="text-gray-300">Potential Liability</span>
+                                        <span className="text-red-400 font-mono font-bold">$245,000</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-sm border-b border-white/5 pb-2">
+                                        <span className="text-gray-300">Customer Impact</span>
+                                        <span className="text-amber-400 font-mono font-bold">1,240 Households</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* DISPATCH CONTROLS */}
+                            <div className="flex-1 bg-emerald-900/10 border border-emerald-500/20 p-6 rounded-lg flex flex-col justify-between relative overflow-hidden">
+                                {dispatchStep === 0 && (
+                                    <>
+                                        <div>
+                                            <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-2">RECOMMENDED ACTION</h3>
+                                            <p className="text-white text-lg font-light leading-snug mb-6">
+                                                Deploy Field Unit for <strong className="text-white font-bold underline decoration-emerald-500">priority maintenance</strong>.
+                                                Drone verification confirms structural anomaly.
+                                            </p>
+
+                                            <div className="flex items-center gap-4 mb-8">
+                                                <div className="bg-black/40 px-4 py-2 rounded text-xs font-mono text-gray-400 border border-white/10">
+                                                    EST. COST: <span className="text-white font-bold ml-2">$450.00</span>
+                                                </div>
+                                                <div className="bg-black/40 px-4 py-2 rounded text-xs font-mono text-gray-400 border border-white/10">
+                                                    SLA TARGET: <span className="text-white font-bold ml-2">48 HOURS</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); startDispatch(); }}
+                                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-lg uppercase tracking-widest shadow-lg shadow-emerald-500/30 transition-all active:scale-95 flex items-center justify-center gap-3"
+                                        >
+                                            <Zap className="w-5 h-5 fill-current" />
+                                            AUTHORIZE DISPATCH
+                                        </button>
+                                    </>
+                                )}
+
+                                {dispatchStep === 1 && (
+                                    <div className="flex flex-col items-center justify-center h-full text-center animate-pulse">
+                                        <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+                                        <h3 className="text-xl font-black text-white uppercase tracking-widest mb-2">ALLOCATING RESOURCES...</h3>
+                                        <p className="text-emerald-400 font-mono text-sm">Searching nearest available crew...</p>
+                                    </div>
+                                )}
+
+                                {dispatchStep === 2 && (
+                                    <div className="flex flex-col items-center justify-center h-full text-center">
+                                        <motion.div
+                                            initial={{ scale: 0 }}
+                                            animate={{ scale: 1 }}
+                                            transition={{ type: "spring", stiffness: 200 }}
+                                            className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_50px_rgba(16,185,129,0.5)]"
+                                        >
+                                            <Zap className="w-10 h-10 text-white fill-current" />
+                                        </motion.div>
+                                        <h3 className="text-2xl font-black text-white uppercase tracking-widest mb-2">DISPATCH CONFIRMED</h3>
+                                        <p className="text-gray-300 font-mono text-sm mb-6">Work Order #WO-{Math.floor(Math.random() * 100000)} generated.</p>
+                                        <div className="bg-emerald-500/20 text-emerald-300 text-xs px-4 py-2 rounded-full border border-emerald-500/30">
+                                            UNIT 4-ALPHA EN ROUTE • ETA 14 MIN
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
-                )}
-            </AnimatePresence>
+                </div>
+            )}
 
             {/* LEFT: VISUAL INTEL FEED (70%) */}
             <div

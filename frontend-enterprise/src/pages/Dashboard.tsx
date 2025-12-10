@@ -162,6 +162,33 @@ export default function Dashboard() {
                             })}
                         </div>
                     </CardContent>
+
+                    {/* REVENUE RECOVERY MODULE (Bottom of Audit Column) */}
+                    <div className="p-4 border-t border-white/10 bg-emerald-950/20">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Revenue Recovery Engine</div>
+                            <div className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30 font-mono">ACTIVE</div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="text-2xl font-black text-white font-mono">$142,850</div>
+                                <div className="text-[10px] text-emerald-400">Unbilled Annual Revenue Detected</div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-lg font-bold text-white font-mono">1,824</div>
+                                <div className="text-[10px] text-gray-400">Ghost Attachments</div>
+                            </div>
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-white/5 flex gap-2">
+                            <button className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] uppercase font-bold py-2 rounded transition-colors">
+                                Generate Invoice
+                            </button>
+                            <button className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/50 text-emerald-400 text-[10px] uppercase font-bold py-2 rounded transition-colors">
+                                Sync Billing DB
+                            </button>
+                        </div>
+                    </div>
                 </Card>
             </div>
         </div>

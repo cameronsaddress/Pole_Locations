@@ -681,7 +681,8 @@ class PoleDetector:
                                             
                                             pil_crop = Image.fromarray(crop)
                                             
-                                            clip_result = self.classifier(images=pil_crop, candidate_labels=self.classification_labels)
+                                            # Pass image as positional argument 1
+                                            clip_result = self.classifier(pil_crop, candidate_labels=self.classification_labels)
                                             top_label = clip_result[0]['label']
                                             top_score = clip_result[0]['score']
 
@@ -698,8 +699,12 @@ class PoleDetector:
                                                     class_name = "pole_nest"
                                                 else:
                                                     class_name = "pole_good"
+                                            else:
+                                                # If we are detecting a pole but CLIP isn't sure of a defect, call it good
+                                                class_name = "pole_good"
+                                                
                                     except Exception as e:
-                                        # Use a logger.debug to avoid spamming logs if classification fails often
+                                        logger.debug(f"CLIP Classification Error: {e}")
                                         pass
 
                                 detections.append({

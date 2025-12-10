@@ -4,21 +4,27 @@ Runs the full verification workflow using only real datasets
 """
 import sys
 from pathlib import Path
-from datetime import datetime
 from typing import List, Tuple, Optional
 
 sys.path.append(str(Path(__file__).parent / 'src'))
 
-import json
-import time
+import argparse
+import sys
 import logging
-import numpy as np
-import pandas as pd
+import json
+import shutil
+import time
+from datetime import datetime
 import geopandas as gpd
-import rasterio
+import pandas as pd
 from shapely.geometry import box
+import numpy as np
+import rasterio
 from rasterio.warp import transform_bounds
 from scipy.spatial import cKDTree
+
+# Adjust path to find src
+sys.path.append(str(Path(__file__).parent))
 
 from src.ingestion.pole_loader import PoleDataLoader
 from src.fusion.pole_matcher import PoleMatcher
@@ -361,15 +367,118 @@ def run_pilot_pipeline(force_recompute: bool = False):
     # Step 2: AI detections on real imagery
     logger.info("\n[STEP 2] Running YOLO detections on real imagery crops...")
     _require_cuda_device()
-    base_tile_dir = PROCESSED_DATA_DIR.parent / 'imagery' / 'naip_tiles'
-    tile_dirs = [base_tile_dir]
+    
+    # Whitelist counties for focused pilot run
+    whitelist = ["dauphin", "cumberland", "york_pa"]
+    all_tile_paths = []
+
+    # 1. Base NAIP tiles (Dauphin)
+    if "dauphin" in whitelist:
+        base_tile_dir = PROCESSED_DATA_DIR.parent / 'imagery' / 'naip_tiles'
+        if base_tile_dir.exists():
+             all_tile_paths.extend(list(base_tile_dir.glob("*.tif")))
+
+    # 2. Multi-county tiles (Cumberland, York)
     multi_root = PROCESSED_DATA_DIR.parent / 'imagery' / 'naip_multi_county'
     if multi_root.exists() and multi_root.is_dir():
         for child in sorted(multi_root.iterdir()):
             if child.is_dir():
-                tile_dirs.append(child)
-    detections_df, tile_paths = _generate_real_ai_detections(tile_dirs, force_recompute=force_recompute)
-    poles_in_coverage, coverage_pct, _coverage_geom = _clip_historical_to_imagery(poles_gdf, tile_paths)
+                # Strict name check
+                if any(w in child.name for w in whitelist):
+                    # specific check to avoid matching new_york if looking for york
+                    # But whitelist has 'york_pa', so 'york_pa' in 'osm_poles_york_pa' works.
+                    # 'york' in 'osm_poles_new_york' would be bad if whitelist was just 'york'.
+                    # Our whitelist is safe.
+                    logger.info(f"   Including county directory: {child.name}")
+                    all_tile_paths.extend(list(child.glob("*.tif")))
+
+    logger.info(f"Total tiles to process: {len(all_tile_paths)}")
+    
+    # Initialize detector
+    detector = PoleDetector(
+        confidence=CONFIDENCE_THRESHOLD,
+        iou=IOU_THRESHOLD
+    )
+
+    # Define detection file path
+    ai_detections_csv = PROCESSED_DATA_DIR / 'ai_detections.csv'
+    
+    # Handle force_recompute for the detection CSV
+    if force_recompute and ai_detections_csv.exists():
+        logger.info(f"Force recompute: Removing existing {ai_detections_csv}")
+        ai_detections_csv.unlink()
+
+    # Check for existing work to resume
+    processed_files = set()
+    if ai_detections_csv.exists():
+        try:
+            # Read just the 'tile_path' column to find what we've done
+            existing_df = pd.read_csv(ai_detections_csv, usecols=['tile_path'])
+            processed_files = set(existing_df['tile_path'].unique())
+            logger.info(f"Resuming... {len(processed_files)} tiles already processed.")
+        except Exception:
+            logger.warning("Could not read existing CSV to resume. Starting fresh or appending blindly.")
+
+    # Initialize stats
+    total_detections = 0
+    start_time = time.perf_counter()
+    
+    # Process incrementally
+    for i, tile_path in enumerate(all_tile_paths):
+        if str(tile_path) in processed_files:
+            logger.info(f"Skipping already processed tile {i+1}/{len(all_tile_paths)}: {tile_path.name}")
+            continue
+            
+        logger.info(f"Processing tile {i+1}/{len(all_tile_paths)}: {tile_path.name}")
+        
+        try:
+            detections = detector.detect_tiles([tile_path], crop_size=640, stride=512)
+            
+            if detections:
+                df = pd.DataFrame(detections)
+                
+                # Append to CSV immediately
+                write_header = not ai_detections_csv.exists()
+                df.to_csv(ai_detections_csv, mode='a', header=write_header, index=False)
+                
+                total_detections += len(detections)
+                logger.info(f"   > Found {len(detections)} poles. Total so far: {total_detections}")
+            else:
+                logger.info("   > No poles found in this tile.")
+                
+        except Exception as e:
+            logger.error(f"Failed to process tile {tile_path}: {e}")
+            continue
+
+    runtime_seconds = time.perf_counter() - start_time
+    logger.info(f"\nAI Detection complete. Total poles found: {total_detections} in {runtime_seconds / 60.0:.2f} minutes.")
+
+    # Load all detections from the CSV for further processing
+    if not ai_detections_csv.exists() or pd.read_csv(ai_detections_csv).empty:
+        raise RuntimeError("YOLO inference completed but produced no detections or CSV is empty.")
+    
+    detections_df = pd.read_csv(ai_detections_csv)
+    
+    # We are NOT doing the validation merge here anymore as we want to keep the raw stream logic simple.
+    # The dashboard reads from ai_detections.csv.
+    
+    # Just ensure metadata is updated
+    detection_date = datetime.utcnow().date().isoformat()
+    metadata = {
+        "generated_at": detection_date,
+        "tile_count": len(all_tile_paths),
+        "tile_roots": [str(p) for p in set(p.parent for p in all_tile_paths)], # Collect unique parent dirs
+        "detections": len(detections_df),
+        "runtime_seconds": runtime_seconds
+    }
+    metadata_path = PROCESSED_DATA_DIR / 'ai_detections_metadata.json'
+    metadata_path.write_text(json.dumps(metadata, indent=2))
+    logger.info(f"✓ Saved {len(detections_df)} real detections to {ai_detections_csv}")
+    logger.info(f"✓ Detection results saved for {len(detections_df):,} poles")
+    logger.info(f"✓ Metadata saved to {metadata_path}")
+
+    # Continue with the rest of the pipeline using the loaded detections_df and all_tile_paths
+    poles_in_coverage, coverage_pct, _coverage_geom = _clip_historical_to_imagery(poles_gdf, all_tile_paths)
     if 'ai_confidence' in detections_df.columns:
         detections_df['confidence'] = detections_df['ai_confidence']
     else:
