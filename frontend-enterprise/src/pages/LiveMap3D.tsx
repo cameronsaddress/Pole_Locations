@@ -141,7 +141,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
     // Auto-open Street View on Expand
     useEffect(() => {
-        setImgState({ scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0 })
+        setImgState({ scale: 2.5, x: 0, y: 0, dragging: false, startX: 0, startY: 0 })
         if (expandedPoleId) {
             setStreetViewOpen(false)
             setSvLoading(true)
