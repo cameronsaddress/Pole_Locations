@@ -543,6 +543,30 @@ class PoleDetector:
                                 center_global_x = col + center_local_x
                                 center_global_y = row + center_local_y
 
+                                # EDGE FILTERING:
+                                # Discard detections near the edge of the inference crop to avoid artifacts.
+                                # Rely on overlapping windows to capture these as centered objects.
+                                edge_margin = 32
+                                is_edge_x = (x1 < edge_margin) or (x2 > crop_size - edge_margin)
+                                is_edge_y = (y1 < edge_margin) or (y2 > crop_size - edge_margin)
+                                
+                                # Check if we are at the real boundary of the large image
+                                at_image_left = (col == 0)
+                                at_image_top = (row == 0)
+                                at_image_right = (col + crop_size >= width)
+                                at_image_bottom = (row + crop_size >= height)
+
+                                # If near edge, drop it UNLESS it's a real image boundary
+                                if is_edge_x:
+                                    if (x1 < edge_margin and not at_image_left) or \
+                                       (x2 > crop_size - edge_margin and not at_image_right):
+                                        continue
+                                
+                                if is_edge_y:
+                                    if (y1 < edge_margin and not at_image_top) or \
+                                       (y2 > crop_size - edge_margin and not at_image_bottom):
+                                        continue
+
                                 lat, lon = self.pixel_to_latlon(
                                     (center_global_x, center_global_y),
                                     transform,

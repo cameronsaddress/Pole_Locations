@@ -11,7 +11,7 @@ from shapely.geometry import Point, box
 from shapely.prepared import prep
 from pyproj import Transformer
 
-from config import (
+from src.config import (
     PROCESSED_DATA_DIR,
     FILTER_MAX_ROAD_DISTANCE_M,
     FILTER_MIN_SURFACE_ELEV_M,

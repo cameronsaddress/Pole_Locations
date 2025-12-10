@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 
-from config import DATA_DIR, RAW_DATA_DIR, PROCESSED_DATA_DIR, IMAGERY_DIR
+from src.config import DATA_DIR, RAW_DATA_DIR, PROCESSED_DATA_DIR, IMAGERY_DIR
 
 
 @dataclass

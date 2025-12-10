@@ -198,7 +198,7 @@ def extract_pole_crops(
                     col_size = min(crop_size, src.width - col_off)
                     row_size = min(crop_size, src.height - row_off)
 
-                    if col_size < crop_size * 0.8 or row_size < crop_size * 0.8:
+                    if col_size < crop_size or row_size < crop_size:
                         invalid_crops += 1
                         continue
 

@@ -27,19 +27,38 @@ def download_osm_poles_harrisburg():
 
     try:
         # Get power infrastructure from OSM
-        # Query for power poles and towers around Harrisburg
-        point = (40.2732, -76.8867)  # Harrisburg, PA
-        dist = 10000  # 10km radius
+        # Define Bounding Boxes for Target Counties (min_lat, min_lon, max_lat, max_lon)
+        # Dauphin, York, Cumberland, Adams, Lebanon
+        regions = {
+            "Dauphin": (40.12, -77.05, 40.67, -76.55),
+            "York": (39.71, -77.10, 40.23, -76.45),
+            "Cumberland": (40.0, -77.60, 40.35, -76.85),
+            "Adams": (39.72, -77.47, 40.0, -77.06),
+            "Lebanon": (40.23, -76.65, 40.58, -76.28)
+        }
 
-        logger.info(f"Querying OSM for power infrastructure...")
-        logger.info(f"Center: {point}")
-        logger.info(f"Radius: {dist}m")
+        all_gdf = []
 
-        # Get all power features
-        tags = {'power': ['pole', 'tower', 'portal', 'catenary_mast']}
+        for county, (min_lat, min_lon, max_lat, max_lon) in regions.items():
+            logger.info(f"Querying OSM for {county} ({min_lat}, {min_lon})...")
+            
+            # Use box instead of point
+            tags = {'power': ['pole', 'tower', 'portal', 'catenary_mast']}
+            try:
+                # OX expects (north, south, east, west)
+                gdf_chunk = ox.geometries_from_bbox(max_lat, min_lat, max_lon, min_lon, tags=tags)
+                if not gdf_chunk.empty:
+                    gdf_chunk['county_ref'] = county
+                    all_gdf.append(gdf_chunk)
+                    logger.info(f"  ✓ Found {len(gdf_chunk)} poles in {county}")
+            except Exception as e:
+                logger.warning(f"  ⚠ Failed to download {county}: {e}")
 
-        logger.info("Downloading power poles...")
-        gdf = ox.geometries_from_point(point, tags=tags, dist=dist)
+        if not all_gdf:
+            logger.error("No poles found in any region!")
+            return None
+            
+        gdf = pd.concat(all_gdf)
 
         if len(gdf) == 0:
             logger.warning("No poles found! Trying broader search...")

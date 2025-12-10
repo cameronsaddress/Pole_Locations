@@ -13,7 +13,7 @@ import sys
 from pyproj import Transformer, CRS
 
 sys.path.append(str(Path(__file__).parent.parent))
-from config import (
+from src.config import (
     VERIFIED_DISTANCE_THRESHOLD, VERIFIED_CONFIDENCE_THRESHOLD,
     IN_QUESTION_CONFIDENCE_THRESHOLD, MATCH_THRESHOLD_METERS,
     WEIGHT_IMAGERY, WEIGHT_RECENCY, WEIGHT_DISTANCE,

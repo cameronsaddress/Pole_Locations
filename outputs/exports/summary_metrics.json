@@ -1,12 +1,12 @@
 {
-  "total_poles": 21250,
-  "verified_good": 19547,
-  "in_question": 1,
-  "new_missing": 1702,
-  "automation_rate": 91.98588235294118,
-  "review_queue_rate": 0.004705882352941177,
+  "total_poles": 65336,
+  "verified_good": 0,
+  "in_question": 19523,
+  "new_missing": 45813,
+  "automation_rate": 0.0,
+  "review_queue_rate": 29.880923227623363,
   "match_rate": 52.23552281563332,
   "matched_poles": 10211,
   "match_denominator": 19548,
-  "inventory_hints_added": 19548
+  "inventory_hints_added": 19507
 }

@@ -1,0 +1,58 @@
+services:
+  polevision-db:
+    build:
+      context: ./backend-enterprise
+      dockerfile: Dockerfile.db
+    container_name: polevision-db
+    environment:
+      POSTGRES_USER: pole_user
+      POSTGRES_PASSWORD: pole_secure_password
+      POSTGRES_DB: polevision
+    ports:
+      - "5433:5432"  # Exposed on 5433 to avoid conflict with existing postgres
+    volumes:
+      - pole_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pole_user -d polevision"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  polevision-api:
+    build: 
+      context: ./backend-enterprise
+      dockerfile: Dockerfile
+    container_name: polevision-api
+    working_dir: /app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend-enterprise:/app
+      - ./data:/data:ro  # Read-only access to training data/imagery
+      - ./models:/models:ro # Read-only access to training weights
+    environment:
+      DATABASE_URL: postgresql://pole_user:pole_secure_password@polevision-db:5432/polevision
+      DATA_DIR: /data
+      MODELS_DIR: /models
+    ports:
+      - "8000:8000"
+    depends_on:
+      polevision-db:
+        condition: service_healthy
+
+  polevision-web:
+    image: node:20-slim
+    container_name: polevision-web
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend-enterprise:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://100.83.153.43:8000
+    depends_on:
+      - polevision-api
+
+volumes:
+  pole_pgdata:
