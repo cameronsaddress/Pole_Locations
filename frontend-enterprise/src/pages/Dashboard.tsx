@@ -1,169 +1,124 @@
-import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { Activity, CheckCircle, AlertTriangle, MapPin } from "lucide-react"
+import { CheckCircle, AlertTriangle, Zap, DollarSign, Activity, FileText } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import LiveMap3D from "./LiveMap3D"
+import CommandCenter from "../components/CommandCenter"
 
-// Type definition for backend stats
-interface TrainingStats {
-    epoch: number
-    total_epochs: number
-    box_loss: number
-    map50: number
-    status: string
-}
-
-const initialStats = [
+// Corporate Operational Stats
+const corporateStats = [
     {
-        label: "Total Assets",
+        label: "Total Assets Managed",
         value: "1,204,592",
-        change: "+12.5%",
+        change: "+125 this week",
         trend: "up",
-        icon: DatabaseIcon,
-        color: "text-blue-500"
+        icon: FileText,
+        color: "text-blue-500",
+        border: "border-blue-500/20"
     },
     {
-        label: "Verify Rate",
-        value: "89.4%",
-        change: "+2.1%",
+        label: "Grid Health Score",
+        value: "99.8%",
+        change: "Optimal Range",
         trend: "up",
-        icon: CheckCircle,
-        color: "text-green-500"
+        icon: Zap,
+        color: "text-emerald-500",
+        border: "border-emerald-500/20"
     },
     {
-        label: "Anomalies",
-        value: "142",
-        change: "-5",
+        label: "Critical Anomalies",
+        value: "3",
+        change: "Requires Action",
         trend: "down",
         icon: AlertTriangle,
-        color: "text-amber-500"
+        color: "text-amber-500",
+        border: "border-amber-500/50" // Highlight this
+    },
+    {
+        label: "Est. Preventative Savings",
+        value: "$2,450,000",
+        change: "YTD Projection",
+        trend: "up",
+        icon: DollarSign,
+        color: "text-green-400",
+        border: "border-green-500/20"
     }
 ]
 
-function DatabaseIcon(props: any) {
-    return <MapPin {...props} /> // Generic icon for now
-}
-
 export default function Dashboard() {
-    const [trainStats, setTrainStats] = useState<TrainingStats | null>(null)
-
-    useEffect(() => {
-        // Dynamically determine the API base URL based on the current browser location
-        const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
-        const wsHost = apiHost.replace('http', 'ws')
-
-        // 1. Initial Fetch
-        fetch(`${apiHost}/api/v2/stats/training`)
-            .then(res => res.json())
-            .then(data => setTrainStats(data))
-            .catch(err => console.error("API Error:", err))
-
-        // 2. WebSocket Subscription
-        const wsUrl = `${wsHost}/ws/training`
-        const ws = new WebSocket(wsUrl)
-
-        ws.onopen = () => console.log("WebSocket Connected to", wsUrl)
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data)
-            setTrainStats(data)
-        }
-        ws.onerror = (err) => console.error("WebSocket Error:", err)
-
-        return () => ws.close()
-    }, [])
-
     return (
-        <div className="space-y-6">
-            {/* Hero Stats */}
+        <div className="space-y-6 h-full flex flex-col">
+
+            {/* 1. EXECUTIVE METRICS ROW */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                {/* Static Business Metrics */}
-                {initialStats.map((stat, i) => (
+                {corporateStats.map((stat, i) => (
                     <motion.div
                         key={stat.label}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.1 }}
                     >
-                        <Card className="backdrop-blur-sm bg-card/50 border-primary/10 shadow-glow hover:shadow-glow-lg transition-all duration-300">
+                        <Card className={`backdrop-blur-sm bg-black/40 border ${stat.border} shadow-lg hover:bg-white/5 transition-all duration-300`}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium">
-                                    {stat.label}
+                                <CardTitle className="text-sm font-medium text-gray-400 font-mono tracking-wider">
+                                    {stat.label.toUpperCase()}
                                 </CardTitle>
                                 <stat.icon className={`h-4 w-4 ${stat.color}`} />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold font-mono tracking-tight">{stat.value}</div>
+                                <div className="text-2xl font-bold font-mono tracking-tight text-white">{stat.value}</div>
                                 <div className="flex items-center text-xs text-muted-foreground mt-1">
-                                    <span className={stat.trend === 'up' ? 'text-green-500' : 'text-red-500'}>
+                                    <span className={stat.trend === 'up' || stat.color.includes('amber') ? stat.color : 'text-green-500'}>
                                         {stat.change}
                                     </span>
-                                    <span className="ml-1">from last sync</span>
                                 </div>
                             </CardContent>
                         </Card>
                     </motion.div>
                 ))}
-
-                {/* Live Training Metric */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 }}
-                >
-                    <Card className="backdrop-blur-sm bg-card/50 border-primary/10 shadow-glow hover:shadow-glow-lg transition-all duration-300 border-l-4 border-l-cyan-500">
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">
-                                Training Epoch
-                            </CardTitle>
-                            <Activity className="h-4 w-4 text-cyan-500 animate-pulse" />
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-2xl font-bold font-mono tracking-tight">
-                                {trainStats ? `${trainStats.epoch} / ${trainStats.total_epochs || 20}` : "Connecting..."}
-                            </div>
-                            <div className="flex items-center text-xs text-muted-foreground mt-1">
-                                {trainStats && (
-                                    <Badge variant="outline" className="mr-2 border-cyan-500/50 text-cyan-500 animate-pulse">
-                                        {trainStats.status}
-                                    </Badge>
-                                )}
-                                <span>Loss: {trainStats ? trainStats.box_loss.toFixed(3) : "..."}</span>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </motion.div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-                {/* Main Map Preview - Now REAL 3D WIDGET */}
-                <div className="col-span-4 h-[500px] rounded-xl overflow-hidden shadow-2xl border border-white/10">
-                    <LiveMap3D mode="widget" />
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-7 flex-1 min-h-[500px]">
+
+                {/* 2. COMMAND CENTER (Main Visual) - 4 Columns */}
+                <div className="col-span-4 h-full min-h-[500px] rounded-xl overflow-hidden shadow-2xl border border-white/10 relative group">
+                    <CommandCenter />
                 </div>
 
-                {/* Recent Activity Feed */}
-                <Card className="col-span-3 backdrop-blur-sm bg-card/30 border-primary/10 h-[500px]">
+                {/* 3. AUDIT LOG FEED - 3 Columns */}
+                <Card className="col-span-3 backdrop-blur-sm bg-black/40 border border-white/10 h-full flex flex-col">
                     <CardHeader>
-                        <CardTitle>Recent Detections</CardTitle>
+                        <CardTitle className="flex items-center gap-2">
+                            <Activity className="w-4 h-4 text-emerald-500" />
+                            <span>Live Audit Log</span>
+                        </CardTitle>
                         <CardDescription>
-                            Model: YOLOv8l (mAP: {trainStats?.map50.toFixed(2) || "0.00"})
+                            Real-time verification stream from field assets.
                         </CardDescription>
                     </CardHeader>
-                    <CardContent>
-                        <div className="space-y-4">
-                            {[1, 2, 3, 4, 5].map((_, i) => (
-                                <div key={i} className="flex items-center">
-                                    <div className="h-9 w-9 rounded bg-muted flex items-center justify-center text-xs font-mono">
-                                        IMG
+                    <CardContent className="flex-1 overflow-auto pr-2">
+                        <div className="space-y-1">
+                            {[
+                                { id: "MT-4021", status: "VERIFIED", msg: "Visual confirmation 100%", time: "Just now", color: "text-emerald-400" },
+                                { id: "MT-4022", status: "FLAGGED", msg: "Vegetation encroachment detected", time: "2m ago", color: "text-amber-400" },
+                                { id: "MT-4023", status: "VERIFIED", msg: "Structural integrity OK", time: "5m ago", color: "text-emerald-400" },
+                                { id: "MT-4025", status: "VERIFIED", msg: "Insulator check passed", time: "12m ago", color: "text-emerald-400" },
+                                { id: "MT-4028", status: "VERIFIED", msg: "Grounding wire visible", time: "15m ago", color: "text-emerald-400" },
+                                { id: "MT-4030", status: "CRITICAL", msg: "Severe lean (>15 deg)", time: "22m ago", color: "text-red-500 animate-pulse" },
+                                { id: "MT-3998", status: "VERIFIED", msg: "Standard audit complete", time: "28m ago", color: "text-emerald-400" },
+                                { id: "MT-3992", status: "VERIFIED", msg: "Cross-arm check passed", time: "35m ago", color: "text-emerald-400" },
+                            ].map((log, i) => (
+                                <div key={i} className="flex items-center p-3 rounded-lg hover:bg-white/5 transition-colors border-b border-white/5 last:border-0">
+                                    <div className={`h-8 w-8 rounded flex items-center justify-center text-[10px] font-mono font-bold bg-white/5 ${log.color}`}>
+                                        {log.status.slice(0, 1)}
                                     </div>
-                                    <div className="ml-4 space-y-1">
-                                        <p className="text-sm font-medium leading-none">Pole Candidate #102{i}</p>
-                                        <p className="text-xs text-muted-foreground">
-                                            Conf: <span className="text-green-400">{(0.85 + i * 0.02).toFixed(2)}</span> • Lat: 40.2{i} • Lon: -76.8{i}
-                                        </p>
+                                    <div className="ml-3 space-y-0.5 flex-1">
+                                        <div className="flex justify-between items-center">
+                                            <p className="text-sm font-medium text-white font-mono">{log.id}</p>
+                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/5 ${log.color}`}>{log.status}</span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">{log.msg}</p>
                                     </div>
-                                    <div className="ml-auto font-medium text-xs text-muted-foreground">
-                                        Just now
+                                    <div className="ml-3 text-[10px] text-gray-600 font-mono whitespace-nowrap">
+                                        {log.time}
                                     </div>
                                 </div>
                             ))}
