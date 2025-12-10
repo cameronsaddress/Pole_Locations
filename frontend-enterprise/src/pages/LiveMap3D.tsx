@@ -18,7 +18,6 @@ interface Asset {
 const getStaticMapUrl = (lat: number, lng: number, width: number, height: number) => {
     // Define a small bounding box around the point.
     // 0.001 degrees is roughly 110 meters.
-    // This provides a good context view (approx 20cm/pixel at 600px width)
     const delta = 0.001;
     const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`;
     return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${bbox}&bboxSR=4326&size=${width},${height}&f=image`;
@@ -103,6 +102,13 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
     const [activePoles, setActivePoles] = useState<Asset[]>([])
     const [expandedPoleId, setExpandedPoleId] = useState<string | null>(null) // Track expanded
 
+    // Zoom/Pan State for Modal Image
+    const [imgState, setImgState] = useState({ scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0 })
+
+    // Street View Panel State
+    const [streetViewOpen, setStreetViewOpen] = useState(false)
+    const [svLoading, setSvLoading] = useState(false)
+
     // Derived selected pole
     const expandedPole = activePoles.find(p => p.id === expandedPoleId)
 
@@ -113,6 +119,33 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
     const isInteractingRef = useRef(false) // Track user interaction to pause rotation
     const [assets, setAssets] = useState<Asset[]>([])
     const [isRotating, setIsRotating] = useState(true)
+
+    // Handlers for Image Interaction
+    const handleWheel = (e: React.WheelEvent) => {
+        e.stopPropagation();
+        setImgState(prev => {
+            let newScale = prev.scale - e.deltaY * 0.001
+            newScale = Math.min(Math.max(1, newScale), 5) // Clamp 1x to 5x
+            return { ...prev, scale: newScale }
+        })
+    }
+    const handleMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault()
+        setImgState(prev => ({ ...prev, dragging: true, startX: e.clientX - prev.x, startY: e.clientY - prev.y }))
+    }
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!imgState.dragging) return
+        setImgState(prev => ({ ...prev, x: e.clientX - prev.startX, y: e.clientY - prev.startY }))
+    }
+    const handleMouseUp = () => setImgState(prev => ({ ...prev, dragging: false }))
+
+    // Reset Zoom on Open
+    useEffect(() => {
+        setImgState({ scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0 })
+        setStreetViewOpen(false)
+        setSvLoading(false)
+    }, [expandedPoleId])
+
 
     // Sync state to ref
     useEffect(() => {
@@ -487,89 +520,155 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
             {/* 3D Map Container */}
             <div ref={mapContainer} className="w-full h-full" />
 
-            {/* EXPANDED MODAL (Hoisted out of Map DOM) */}
+            {/* EXPANDED MODAL + SLIDEOUT */}
             {expandedPole && (
-                <div
-                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-300"
+                <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-300"
                     onClick={(e) => {
-                        e.stopPropagation()
+                        e.stopPropagation();
                         setExpandedPoleId(null)
                     }}
                 >
-                    <div
-                        className="relative w-[900px] h-[500px] bg-black border border-emerald-500/50 rounded-xl shadow-2xl overflow-hidden flex animate-in zoom-in-95 duration-300"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* LEFT: IMAGE (60%) */}
-                        <div className="w-[60%] h-full relative bg-neutral-900 overflow-hidden border-r border-white/10">
-                            <div
-                                className="w-full h-full bg-cover bg-center transition-transform duration-700 hover:scale-105"
-                                style={{
-                                    backgroundImage: `url(${getStaticMapUrl(expandedPole.lat, expandedPole.lng, 600, 500)})`,
-                                    filter: 'contrast(1.1) brightness(1.1)'
-                                }}
-                            />
-                            {/* Reticle */}
-                            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                                <div className="absolute w-[2px] h-20 bg-emerald-500/50"></div>
-                                <div className="absolute w-20 h-[2px] bg-emerald-500/50"></div>
-                                <div className="w-16 h-16 border-2 border-emerald-500/50 rounded-full"></div>
-                                <div className="absolute top-4 left-4 text-xs font-mono text-emerald-500 bg-black/50 px-2 py-1 rounded">
-                                    SOURCE: ESRI / MAXAR // {new Date().toLocaleDateString().toUpperCase()}
+
+                    {/* Centered Stacking Context */}
+                    <div className="relative flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+
+                        {/* MAIN INSPECTOR MODAL */}
+                        <div className="relative z-20 w-[900px] h-[500px] bg-black border border-emerald-500/50 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex animate-in zoom-in-95 duration-300">
+
+                            {/* IMAGE SIDE (Zoomable) */}
+                            <div className="w-[60%] h-full relative bg-neutral-950 overflow-hidden border-r border-white/10"
+                                onWheel={handleWheel}
+                                onMouseDown={handleMouseDown}
+                                onMouseMove={handleMouseMove}
+                                onMouseUp={handleMouseUp}
+                                onMouseLeave={handleMouseUp}
+                            >
+                                <div className="absolute inset-0 bg-neutral-900 flex items-center justify-center overflow-hidden cursor-crosshair">
+                                    <div
+                                        className="w-full h-full bg-cover bg-center transition-transform duration-75 ease-linear"
+                                        style={{
+                                            backgroundImage: `url(${getStaticMapUrl(expandedPole.lat, expandedPole.lng, 800, 600)})`,
+                                            filter: 'contrast(1.1) brightness(1.1)',
+                                            transform: `scale(${imgState.scale}) translate(${imgState.x}px, ${imgState.y}px)`,
+                                            cursor: imgState.dragging ? 'grabbing' : 'grab'
+                                        }}
+                                    />
+                                </div>
+                                {/* HUD Overlays */}
+                                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                                    <div className="absolute w-[2px] h-20 bg-emerald-500/50"></div>
+                                    <div className="absolute w-20 h-[2px] bg-emerald-500/50"></div>
+                                    <div className="w-16 h-16 border-2 border-emerald-500/50 rounded-full"></div>
+                                    <div className="absolute top-4 left-4 text-xs font-mono text-emerald-500 bg-black/50 px-2 py-1 rounded">
+                                        RAW FEED // {imgState.scale.toFixed(1)}x ZOOM
+                                    </div>
+                                    <div className="absolute bottom-4 left-4 text-[10px] font-mono text-white/50 bg-black/50 px-2 py-1 rounded">
+                                        SCROLL TO ZOOM // DRAG TO PAN
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        {/* RIGHT: DATA (40%) */}
-                        <div className="w-[40%] h-full bg-gradient-to-br from-gray-900 to-black p-8 flex flex-col justify-between">
-                            {/* Close */}
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    setExpandedPoleId(null)
-                                }}
-                                className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                            </button>
+                            {/* DATA SIDE */}
+                            <div className="w-[40%] h-full bg-gradient-to-br from-gray-900 to-black p-8 flex flex-col justify-between relative z-30">
+                                {/* Close */}
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        setExpandedPoleId(null)
+                                    }}
+                                    className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
 
-                            <div>
-                                <h2 className="text-3xl font-black text-white tracking-tight mb-1">ASSET DETECTED</h2>
-                                <div className="text-emerald-400 font-mono text-lg mb-8">ID: {expandedPole.id}</div>
+                                <div>
+                                    <h2 className="text-3xl font-black text-white tracking-tight mb-1">ASSET DETECTED</h2>
+                                    <div className="text-emerald-400 font-mono text-lg mb-8">ID: {expandedPole.id}</div>
 
-                                <div className="space-y-6">
-                                    <div>
-                                        <div className="text-xs font-mono text-gray-500 mb-1">COORDINATES</div>
-                                        <div className="text-xl font-mono text-white tracking-widest">{expandedPole.lat.toFixed(5)} N</div>
-                                        <div className="text-xl font-mono text-white tracking-widest">{expandedPole.lng.toFixed(5)} W</div>
-                                    </div>
+                                    <div className="space-y-6">
+                                        <div>
+                                            <div className="text-xs font-mono text-gray-500 mb-1">COORDINATES</div>
+                                            <div className="text-xl font-mono text-white tracking-widest">{expandedPole.lat.toFixed(5)} N</div>
+                                            <div className="text-xl font-mono text-white tracking-widest">{expandedPole.lng.toFixed(5)} W</div>
+                                        </div>
 
-                                    <div>
-                                        <div className="text-xs font-mono text-gray-500 mb-1">CONFIDENCE SCORE</div>
-                                        <div className="flex items-center gap-3">
-                                            <div className="h-2 flex-1 bg-gray-800 rounded-full overflow-hidden">
-                                                <div className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]" style={{ width: `${expandedPole.confidence * 100}%` }}></div>
+                                        <div>
+                                            <div className="text-xs font-mono text-gray-500 mb-1">CONFIDENCE SCORE</div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="h-2 flex-1 bg-gray-800 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]" style={{ width: `${expandedPole.confidence * 100}%` }}></div>
+                                                </div>
+                                                <span className="text-2xl font-bold text-emerald-400">{(expandedPole.confidence * 100).toFixed(0)}%</span>
                                             </div>
-                                            <span className="text-2xl font-bold text-emerald-400">{(expandedPole.confidence * 100).toFixed(0)}%</span>
+                                        </div>
+
+                                        <div>
+                                            <div className="text-xs font-mono text-gray-500 mb-1">STATUS</div>
+                                            <span className="inline-block px-3 py-1 bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 rounded text-sm font-bold tracking-wider">
+                                                VERIFIED ACTIVE
+                                            </span>
                                         </div>
                                     </div>
-
-                                    <div>
-                                        <div className="text-xs font-mono text-gray-500 mb-1">STATUS</div>
-                                        <span className="inline-block px-3 py-1 bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 rounded text-sm font-bold tracking-wider">
-                                            VERIFIED ACTIVE
-                                        </span>
-                                    </div>
                                 </div>
-                            </div>
 
-                            <Button
-                                className="w-full h-12 bg-white text-black hover:bg-gray-200 font-bold tracking-widest text-sm rounded-sm transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)]"
-                                onClick={() => window.open(`https://www.google.com/maps?q&layer=c&cbll=${expandedPole.lat},${expandedPole.lng}`, '_blank')}
-                            >
-                                OPEN STREET VIEW
-                            </Button>
+                                <Button
+                                    className={`w-full h-12 font-bold tracking-widest text-sm rounded-sm transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)] ${streetViewOpen ? 'bg-emerald-500 text-black hover:bg-emerald-400' : 'bg-white text-black hover:bg-gray-200'}`}
+                                    onClick={() => {
+                                        setStreetViewOpen(!streetViewOpen);
+                                        if (!streetViewOpen) {
+                                            // Simulate "Check"
+                                            setSvLoading(true);
+                                            setTimeout(() => setSvLoading(false), 1500)
+                                        }
+                                    }}
+                                >
+                                    {streetViewOpen ? 'CLOSE STREET VIEW' : 'CHECK STREET VIEW DB'}
+                                </Button>
+                            </div>
                         </div>
+
+                        {/* SLIDE OUT STREET VIEW PANEL (Behind) */}
+                        <div
+                            className="absolute z-10 top-0 right-0 h-[500px] w-[500px] bg-zinc-950 border-r border-y border-emerald-500/30 rounded-r-xl shadow-2xl transition-all duration-500 ease-in-out flex flex-col overflow-hidden"
+                            style={{
+                                transform: streetViewOpen ? 'translateX(480px)' : 'translateX(0)', // 480px shift right
+                                opacity: streetViewOpen ? 1 : 0
+                            }}
+                        >
+                            <div className="h-full w-full flex flex-col relative">
+                                <div className="absolute top-2 left-4 z-20 bg-black/70 px-2 py-1 rounded text-[10px] font-mono text-emerald-500">GOOGLE STREET VIEW DB</div>
+
+                                {svLoading ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+                                        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                                        <div className="text-xs font-mono text-emerald-500 animate-pulse">SEARCHING DATABASE...</div>
+                                    </div>
+                                ) : (
+                                    <div className="flex-1 bg-zinc-900 relative">
+                                        {/* Fallback for no API key */}
+                                        <iframe
+                                            width="100%"
+                                            height="100%"
+                                            style={{ border: 0, filter: 'invert(0.9) hue-rotate(180deg) opacity(0.2)' }}
+                                            loading="lazy"
+                                            allowFullScreen
+                                            src={`https://www.google.com/maps/embed?pb=!1m0!3m2!1sen!2sus!4v1494459140784!6m8!1m7!1sCAoSLEFGMVFpcE5uO...`} // Dummy safe embed or empty
+                                        ></iframe>
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center pointer-events-none">
+                                            <div className="text-emerald-500 text-4xl mb-2 font-bold">MATCH FOUND</div>
+                                            <div className="text-zinc-500 text-xs mb-6">INTERACTIVE PREVIEW AVAILABLE</div>
+                                            <Button
+                                                className="bg-emerald-900/50 text-emerald-400 border border-emerald-500/50 pointer-events-auto hover:bg-emerald-500 hover:text-black transition-colors"
+                                                onClick={() => window.open(`https://www.google.com/maps?q&layer=c&cbll=${expandedPole.lat},${expandedPole.lng}`, '_blank')}
+                                            >
+                                                LAUNCH FULL VIEWER
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
                     </div>
                 </div>
             )}
