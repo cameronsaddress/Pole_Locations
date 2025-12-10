@@ -632,14 +632,28 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                             <div className="h-full w-full flex flex-col relative">
                                 <div className="absolute top-2 left-4 z-20 bg-black/70 px-2 py-1 rounded text-[10px] font-mono text-emerald-500">GOOGLE STREET VIEW DB</div>
                                 <div className="flex-1 bg-zinc-900 relative pointer-events-auto">
-                                    <iframe
-                                        width="100%"
-                                        height="100%"
-                                        style={{ border: 0 }}
-                                        loading="lazy"
-                                        allowFullScreen
-                                        src={`https://maps.google.com/maps?layer=c&cbll=${expandedPole.lat},${expandedPole.lng}&cbp=12,0,0,0,0&source=embed&output=svembed`}
-                                    />
+                                    {import.meta.env.VITE_GOOGLE_MAPS_API_KEY ? (
+                                        <iframe
+                                            width="100%"
+                                            height="100%"
+                                            style={{ border: 0 }}
+                                            loading="lazy"
+                                            allowFullScreen
+                                            src={`https://www.google.com/maps/embed/v1/streetview?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&location=${expandedPole.lat},${expandedPole.lng}&heading=0&pitch=10&fov=90`}
+                                        />
+                                    ) : (
+                                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
+                                            <div className="w-12 h-12 rounded-full bg-yellow-500/10 flex items-center justify-center border border-yellow-500/50">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-yellow-500"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                                            </div>
+                                            <div>
+                                                <div className="text-yellow-500 font-mono text-xs font-bold tracking-widest mb-2">API KEY REQUIRED</div>
+                                                <p className="text-zinc-500 text-xs max-w-[200px] mx-auto">
+                                                    Add <code className="bg-zinc-800 px-1 py-0.5 rounded text-zinc-300">VITE_GOOGLE_MAPS_API_KEY</code> to your .env file to enable live Street View.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
