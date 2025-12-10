@@ -20,9 +20,9 @@ Verizon maintains over one million utility poles on the East Coast that require 
 The solution employs a modular Python pipeline with four core stages:
 
 1. **Data Ingestion Layer**: Collect and preprocess pole records from multiple sources
-2. **AI Detection Layer**: Use computer vision to detect poles and estimate locations from imagery
+2. **AI Detection Layer**: Use computer vision (YOLOv8 + CLIP) to detect poles and classify specific defects (Lean, Vegetation, Damage)
 3. **Fusion & Verification Layer**: Cross-validate detections against historical data with confidence scoring
-4. **Output Layer**: Generate reports flagging poles for review, with dashboard for human oversight
+4. **Command Center Output**: Live "Ops Center" dashboard for real-time network health monitoring
 
 ### Data Sources
 
@@ -36,20 +36,23 @@ The solution employs a modular Python pipeline with four core stages:
 ### Workflow
 
 ```
-[Data Inputs] → Preprocess → AI Detection (YOLOv8 on Imagery) →
-Fusion Matching (Spatial + Scoring) → Classification →
-[Outputs: Verified/Review Queue]
+[Data Inputs] → Preprocess → AI Detection (YOLOv8) → Zero-Shot Classification (CLIP) →
+Fusion Matching (Spatial + Scoring) → Operational Status Assignment →
+[Outputs: Command Center / Critical Alerts]
      ↑
 Human Feedback Loop (Retraining)
 ```
 
-### Classification Logic
+### Defect Classification Logic (Real Intelligence)
 
-Poles are categorized into three groups:
+The system now uses **Zero-Shot CLIP Classification** to identify specific high-value defects:
 
-- **Verified Good**: Detection matches report coords (<5m distance), high confidence (>0.8), recent verified status → Auto-eliminate from review
-- **In Question**: Mismatch >5m OR low confidence (<0.6) OR conflicting reports → Flag for human review
-- **New/Missing**: Detections without matching reports OR missing poles → Escalate for field verification
+- **Severe Lean**: Pole listing > 10 degrees (Structural Risk)
+- **Vegetation Encroachment**: Heavy canopy coverage (Fire/Outage Risk)
+- **Equipment Damage**: Broken crossarms or insulators (Maintenance Priority)
+- **Rusted Transformer**: Visible corrosion (Asset Lifecycle)
+- **Bird Nest**: Nesting material on structure (Environmental/Fire Risk)
+- **Verified Good**: Clean, vertical pole with clear clearance
 
 ### Confidence Scoring
 
@@ -61,10 +64,13 @@ Weighted algorithm combines multiple factors:
 ### Technology Stack
 
 - **Geospatial Processing**: Pandas, GeoPandas, Rasterio, GDAL
-- **AI/Computer Vision**: PyTorch/TensorFlow, YOLOv8 (Ultralytics)
+- **AI/Computer Vision**: 
+  - **YOLOv8** (Object Detection)
+  - **OpenAI CLIP** (Zero-Shot Defect Classification)
+  - **PyTorch** (Inference Engine)
 - **Spatial Indexing**: SciPy KDTree
 - **OCR**: Tesseract (for unstructured report parsing)
-- **Web App**: FastAPI backend + React (Vite) frontend for live dashboards; optional Streamlit diff viewer for POC demos
+- **Web App**: FastAPI backend + React (Vite) frontend for live dashboards
 - **Cloud Infrastructure**: AWS/Azure for batch processing with Dask parallelization
 - **Imagery APIs**: Google Earth Engine, Planet API, AWS S3 (NAIP)
 
