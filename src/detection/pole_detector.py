@@ -111,10 +111,12 @@ class PoleDetector:
         # Initialize Zero-Shot Classifier
         self.classifier = None
         self.classification_labels = [
-            "good utility pole", 
+            "clean utility pole",
+            "utility pole with heavy vegetation encroachment", 
             "leaning utility pole", 
-            "utility pole obscured by vegetation", 
-            "broken or damaged utility pole"
+            "broken or damaged utility pole crossarm",
+            "rusted utility pole transformer",
+            "bird nest on utility pole"
         ]
         
         if HAS_TRANSFORMERS:
@@ -683,13 +685,17 @@ class PoleDetector:
                                             top_label = clip_result[0]['label']
                                             top_score = clip_result[0]['score']
 
-                                            if top_score > 0.4:
+                                            if top_score > 0.35: # Slightly lower threshold for specific features
                                                 if "leaning" in top_label:
                                                     class_name = "pole_leaning"
                                                 elif "vegetation" in top_label:
                                                     class_name = "pole_vegetation"
-                                                elif "broken" in top_label or "damaged" in top_label:
+                                                elif "damaged" in top_label or "broken" in top_label:
                                                     class_name = "pole_damage"
+                                                elif "rusted" in top_label:
+                                                    class_name = "pole_rust"
+                                                elif "bird nest" in top_label:
+                                                    class_name = "pole_nest"
                                                 else:
                                                     class_name = "pole_good"
                                     except Exception as e:
