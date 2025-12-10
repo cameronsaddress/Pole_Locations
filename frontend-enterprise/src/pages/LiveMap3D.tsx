@@ -139,11 +139,19 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
     }
     const handleMouseUp = () => setImgState(prev => ({ ...prev, dragging: false }))
 
-    // Reset Zoom on Open
+    // Auto-open Street View on Expand
     useEffect(() => {
         setImgState({ scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0 })
-        setStreetViewOpen(false)
-        setSvLoading(false)
+        if (expandedPoleId) {
+            setStreetViewOpen(false)
+            setSvLoading(true)
+            const t1 = setTimeout(() => setStreetViewOpen(true), 600) // Slide out
+            const t2 = setTimeout(() => setSvLoading(false), 2000)   // Finish search
+            return () => { clearTimeout(t1); clearTimeout(t2) }
+        } else {
+            setStreetViewOpen(false)
+            setSvLoading(false)
+        }
     }, [expandedPoleId])
 
 
@@ -610,20 +618,6 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                                         </div>
                                     </div>
                                 </div>
-
-                                <Button
-                                    className={`w-full h-12 font-bold tracking-widest text-sm rounded-sm transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)] ${streetViewOpen ? 'bg-emerald-500 text-black hover:bg-emerald-400' : 'bg-white text-black hover:bg-gray-200'}`}
-                                    onClick={() => {
-                                        setStreetViewOpen(!streetViewOpen);
-                                        if (!streetViewOpen) {
-                                            // Simulate "Check"
-                                            setSvLoading(true);
-                                            setTimeout(() => setSvLoading(false), 1500)
-                                        }
-                                    }}
-                                >
-                                    {streetViewOpen ? 'CLOSE STREET VIEW' : 'CHECK STREET VIEW DB'}
-                                </Button>
                             </div>
                         </div>
 
