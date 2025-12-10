@@ -94,29 +94,40 @@ def load_real_assets():
                 if status == "Review" and road_dist > 35.0:
                     continue
 
-                # --- PHASE 1: GENERATE OP INTEL ---
-                # Default "Healthy" State
+                # --- PHASE 1: DETERMINISTIC OP INTEL (NO MOCK) ---
                 issues = []
                 health = 1.0
                 impact = 0.0
                 
-                # 5% chance of being an "Anomaly"
-                if random.random() < 0.05:
-                    status = "Critical" if random.random() < 0.3 else "Flagged"
-                    # Assign random issues
-                    num_issues = 1 if random.random() < 0.8 else 2
-                    issues = random.sample(ISSUE_TYPES, num_issues)
-                    
-                    # Calculate Score & Impact
-                    impact = sum(SAVINGS_MAP[i] for i in issues)
-                    # Heuristic: Each issue drops health by 20-40%
-                    health = max(0.0, 1.0 - (0.3 * num_issues))
+                # Logic: Real classification + Context (Road Dist) = Ops Level
+                is_near_road = road_distance_m < 15.0
+                
+                if status == "verified_good" or status == "Verified":
+                    status = "Verified"
+                    health = 1.0
+                    impact = 0.0
+                else:
+                    # It is "needs_review" or "in_question"
+                    if is_near_road:
+                        status = "Critical"
+                        issues.append(f"Road Risk (Dist: {int(road_distance_m)}m)")
+                        issues.append("Visual Anomaly")
+                        health = 0.4
+                        impact = 25000.0 # High liability cost
+                    else:
+                        status = "Flagged"
+                        issues.append("Visual Anomaly")
+                        health = 0.7
+                        impact = 2000.0 # Inspection cost
+
+                # Overwrite status for UI if critical
+                ui_status = status
 
                 assets.append(Asset(
                     id=row.get("pole_id", "UNKNOWN"),
                     lat=float(row.get("lat", 0.0)),
                     lng=float(row.get("lon", 0.0)),
-                    status=status,
+                    status=ui_status,
                     confidence=conf,
                     detected_at=row.get("inspection_date") or datetime.now().isoformat(),
                     issues=issues,
