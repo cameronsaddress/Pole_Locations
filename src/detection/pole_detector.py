@@ -13,6 +13,14 @@ import torch
 import rasterio
 from rasterio.windows import Window
 import rasterio.errors
+from PIL import Image
+
+try:
+    from transformers import pipeline
+    HAS_TRANSFORMERS = True
+except ImportError:
+    HAS_TRANSFORMERS = False
+    logging.getLogger(__name__).warning("transformers library not found. Zero-shot classification disabled. Install with `pip install transformers`")
 
 if "cv2.dnn" not in sys.modules:
     cv2_dnn = types.ModuleType("cv2.dnn")
@@ -98,6 +106,30 @@ class PoleDetector:
 
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         if torch.cuda.is_available():
+            logger.info("Using GPU: %s", torch.cuda.get_device_name(0))
+        
+        # Initialize Zero-Shot Classifier
+        self.classifier = None
+        self.classification_labels = [
+            "good utility pole", 
+            "leaning utility pole", 
+            "utility pole obscured by vegetation", 
+            "broken or damaged utility pole"
+        ]
+        
+        if HAS_TRANSFORMERS:
+            try:
+                logger.info("Loading CLIP model for zero-shot classification...")
+                # device=0 for GPU, -1 for CPU
+                clf_device = 0 if torch.cuda.is_available() else -1
+                self.classifier = pipeline(
+                    "zero-shot-image-classification", 
+                    model="openai/clip-vit-base-patch32",
+                    device=clf_device
+                )
+                logger.info("CLIP model loaded successfully.")
+            except Exception as e:
+                logger.warning(f"Failed to load CLIP model: {e}")
             try:
                 device_name = torch.cuda.get_device_name(0)
             except Exception:  # pragma: no cover - defensive
@@ -188,6 +220,14 @@ class PoleDetector:
         Returns:
             List of detections with bounding boxes and confidence scores
         """
+        # Load image for cropping
+        # Only load if we have a classifier to use
+        img = None
+        if self.classifier:
+            img = cv2.imread(str(image_path))
+            if img is not None:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
         results = self.model.predict(
             source=str(image_path),
             conf=self.confidence,
@@ -214,6 +254,40 @@ class PoleDetector:
                 center_y = (y1 + y2) / 2
                 width = x2 - x1
                 height = y2 - y1
+                
+                # Default Class Name
+                class_name = result.names[cls] if hasattr(result, 'names') else 'utility_pole'
+
+                # --- ZERO-SHOT CLASSIFICATION ---
+                if self.classifier and img is not None:
+                    # Ensure coordinates are within bounds
+                    h, w, _ = img.shape
+                    ix1, iy1 = max(0, int(x1)), max(0, int(y1))
+                    ix2, iy2 = min(w, int(x2)), min(h, int(y2))
+                    
+                    if ix2 > ix1 and iy2 > iy1:
+                        crop = img[iy1:iy2, ix1:ix2]
+                        try:
+                            pil_crop = Image.fromarray(crop)
+                            # Run classification
+                            clip_result = self.classifier(images=pil_crop, candidate_labels=self.classification_labels)
+                            # Result is a list of {'label': str, 'score': float}
+                            # Get top prediction
+                            top_label = clip_result[0]['label']
+                            top_score = clip_result[0]['score']
+                            
+                            # Simple mapping to internal enum/short names
+                            if top_score > 0.4: # Threshold for specific defect
+                                if "leaning" in top_label:
+                                    class_name = "pole_leaning"
+                                elif "vegetation" in top_label:
+                                    class_name = "pole_vegetation"
+                                elif "broken" in top_label or "damaged" in top_label:
+                                    class_name = "pole_damage"
+                                else:
+                                    class_name = "pole_good"
+                        except Exception as e:
+                            logger.debug(f"Classification failed for box {i}: {e}")
 
                 detection = {
                     'bbox': [float(x1), float(y1), float(x2), float(y2)],
@@ -221,7 +295,7 @@ class PoleDetector:
                     'dimensions': [float(width), float(height)],
                     'confidence': conf,
                     'class': cls,
-                    'class_name': result.names[cls] if hasattr(result, 'names') else 'utility_pole'
+                    'class_name': class_name
                 }
 
                 detections.append(detection)
@@ -582,6 +656,45 @@ class PoleDetector:
                                     continue
 
                                 ndvi_value = self._sample_ndvi(src, center_global_x, center_global_y)
+                                
+                                # Default Class
+                                class_name = "utility_pole"
+                                
+                                # --- ZERO-SHOT CLASSIFICATION ---
+                                if self.classifier:
+                                    try:
+                                        # Crop from local window `image` using local box coords
+                                        h_img, w_img, _ = image.shape
+                                        ix1, iy1 = max(0, int(x1)), max(0, int(y1))
+                                        ix2, iy2 = min(w_img, int(x2)), min(h_img, int(y2))
+                                        
+                                        if ix2 > ix1 and iy2 > iy1:
+                                            # image is typically RGB from rasterio read([1,2,3])
+                                            crop = image[iy1:iy2, ix1:ix2]
+                                            # Converting numpy array to PIL
+                                            # Ensure uint8
+                                            if crop.dtype != np.uint8:
+                                                # NAIP is usually 8-bit, but just in case
+                                                crop = (crop / crop.max() * 255).astype(np.uint8)
+                                            
+                                            pil_crop = Image.fromarray(crop)
+                                            
+                                            clip_result = self.classifier(images=pil_crop, candidate_labels=self.classification_labels)
+                                            top_label = clip_result[0]['label']
+                                            top_score = clip_result[0]['score']
+
+                                            if top_score > 0.4:
+                                                if "leaning" in top_label:
+                                                    class_name = "pole_leaning"
+                                                elif "vegetation" in top_label:
+                                                    class_name = "pole_vegetation"
+                                                elif "broken" in top_label or "damaged" in top_label:
+                                                    class_name = "pole_damage"
+                                                else:
+                                                    class_name = "pole_good"
+                                    except Exception as e:
+                                        # Use a logger.debug to avoid spamming logs if classification fails often
+                                        pass
 
                                 detections.append({
                                     'pole_id': f"AI_DET_{tile_path.stem}_{len(detections) + 1}",
@@ -594,7 +707,8 @@ class PoleDetector:
                                     'bbox': [float(x1 + col), float(y1 + row),
                                              float(x2 + col), float(y2 + row)],
                                     'source': 'ai_detection',
-                                    'ndvi': ndvi_value
+                                    'ndvi': ndvi_value,
+                                    'class_name': class_name
                                 })
                                 seen_coords.append((lat, lon))
 
