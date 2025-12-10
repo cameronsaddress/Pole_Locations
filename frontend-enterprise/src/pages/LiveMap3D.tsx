@@ -631,35 +631,16 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                         >
                             <div className="h-full w-full flex flex-col relative">
                                 <div className="absolute top-2 left-4 z-20 bg-black/70 px-2 py-1 rounded text-[10px] font-mono text-emerald-500">GOOGLE STREET VIEW DB</div>
-
-                                {svLoading ? (
-                                    <div className="flex-1 flex flex-col items-center justify-center space-y-4">
-                                        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                                        <div className="text-xs font-mono text-emerald-500 animate-pulse">SEARCHING DATABASE...</div>
-                                    </div>
-                                ) : (
-                                    <div className="flex-1 bg-zinc-900 relative">
-                                        {/* Fallback for no API key */}
-                                        <iframe
-                                            width="100%"
-                                            height="100%"
-                                            style={{ border: 0, filter: 'invert(0.9) hue-rotate(180deg) opacity(0.2)' }}
-                                            loading="lazy"
-                                            allowFullScreen
-                                            src={`https://www.google.com/maps/embed?pb=!1m0!3m2!1sen!2sus!4v1494459140784!6m8!1m7!1sCAoSLEFGMVFpcE5uO...`} // Dummy safe embed or empty
-                                        ></iframe>
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center pointer-events-none">
-                                            <div className="text-emerald-500 text-4xl mb-2 font-bold">MATCH FOUND</div>
-                                            <div className="text-zinc-500 text-xs mb-6">INTERACTIVE PREVIEW AVAILABLE</div>
-                                            <Button
-                                                className="bg-emerald-900/50 text-emerald-400 border border-emerald-500/50 pointer-events-auto hover:bg-emerald-500 hover:text-black transition-colors"
-                                                onClick={() => window.open(`https://www.google.com/maps?q&layer=c&cbll=${expandedPole.lat},${expandedPole.lng}`, '_blank')}
-                                            >
-                                                LAUNCH FULL VIEWER
-                                            </Button>
-                                        </div>
-                                    </div>
-                                )}
+                                <div className="flex-1 bg-zinc-900 relative pointer-events-auto">
+                                    <iframe
+                                        width="100%"
+                                        height="100%"
+                                        style={{ border: 0 }}
+                                        loading="lazy"
+                                        allowFullScreen
+                                        src={`https://maps.google.com/maps?layer=c&cbll=${expandedPole.lat},${expandedPole.lng}&source=embed&output=svembed`}
+                                    />
+                                </div>
                             </div>
                         </div>
 
