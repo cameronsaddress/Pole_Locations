@@ -13,32 +13,15 @@ interface Asset {
     confidence: number
 }
 
-// Helper to get Satellite Tile URL
-const getTileUrl = (lat: number, lng: number, zoom: number) => {
-    const n = Math.pow(2, zoom);
-    const x = Math.floor((lng + 180) / 360 * n);
-    const latRad = lat * Math.PI / 180;
-    const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
-    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
+// Helper to get Centered Static Map Image (Export API)
+// This guarantees the pole is exactly in the center, no tile edge issues.
+const getStaticMapUrl = (lat: number, lng: number, width: number, height: number) => {
+    // Define a small bounding box around the point.
+    // 0.0005 degrees is roughly 50 meters.
+    const delta = 0.0005;
+    const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`;
+    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${bbox}&bboxSR=4326&size=${width},${height}&f=image`;
 };
-
-// Helper to get precise pixel offset within the tile
-const getTileOffset = (lat: number, lng: number, zoom: number) => {
-    const n = Math.pow(2, zoom)
-    const x_world = (lng + 180) / 360
-    const latRad = lat * Math.PI / 180
-    const y_world = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2
-
-    // Tile Numbers
-    const x_tile = Math.floor(x_world * n)
-    const y_tile = Math.floor(y_world * n)
-
-    // Pixel Coords inside tile (0-256)
-    const x_pixel = (x_world * n - x_tile) * 256
-    const y_pixel = (y_world * n - y_tile) * 256
-
-    return { x: x_pixel, y: y_pixel }
-}
 
 // ----------------------------------------------------------------------------
 // FLOATING MARKER COMPONENT
@@ -46,172 +29,68 @@ const getTileOffset = (lat: number, lng: number, zoom: number) => {
 const PoleMarker = ({ pole, onExpand, onClose, isExpanded }: {
     pole: Asset,
     onExpand: () => void,
-    onClose: () => void,
+    onClose?: () => void,
     isExpanded: boolean
 }) => {
-    // Image Setup
-    const zoomLevel = 19
-    const tileUrl = getTileUrl(pole.lat, pole.lng, zoomLevel)
-    const offset = getTileOffset(pole.lat, pole.lng, zoomLevel)
-
-    // Center calculations:
-    const smallBgPos = `${90 - offset.x}px ${40 - offset.y}px`
-
-    // Expanded: 60% of 800px = 480px wide. Center is 240px.
-    // Height 500px. Center is 250px.
-    const largeBgPos = `${240 - offset.x * 2}px ${250 - offset.y * 2}px` // 2x Zoom for sharpness
+    // Fetch a centered 200x200 thumbnail
+    const imageUrl = getStaticMapUrl(pole.lat, pole.lng, 200, 200)
 
     return (
-        <>
-            {/* MINI MARKER (Hidden if this specific pole is expanded) */}
-            <div className={`flex flex-col items-center origin-bottom animate-in zoom-in-50 duration-500 ${isExpanded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        <div className={`flex flex-col items-center origin-bottom animate-in zoom-in-50 duration-500 ${isExpanded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
 
-                {/* 1. THE FLOATING CARD */}
-                <div className="animate-in slide-in-from-bottom-10 fade-in duration-700 ease-out group perspective-1000 origin-bottom">
-                    <Card
-                        className="w-[180px] backdrop-blur-3xl bg-black/90 border border-emerald-500/50 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-sm overflow-hidden cursor-pointer transition-transform duration-300 hover:scale-110 z-10"
-                        onClick={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            onExpand()
-                        }}
-                    >
-
-                        {/* Header */}
-                        <div className="px-2 py-1.5 border-b border-white/10 flex justify-between items-center bg-gradient-to-r from-emerald-950 to-black">
-                            <span className="text-[10px] font-mono text-emerald-400 font-bold tracking-widest pl-1">
-                                #{pole.id.slice(-6).toUpperCase()}
-                            </span>
-                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse box-shadow-[0_0_10px_#10b981]" />
-                        </div>
-
-                        {/* Image */}
-                        <div className="relative h-20 w-full bg-neutral-900 group overflow-hidden">
-                            <div
-                                className="absolute inset-0 bg-no-repeat transition-opacity duration-500"
-                                style={{
-                                    backgroundImage: `url(${tileUrl})`,
-                                    backgroundPosition: smallBgPos,
-                                    backgroundSize: '256px 256px',
-                                    transform: 'scale(1.5)',
-                                    transformOrigin: `${offset.x}px ${offset.y}px`,
-                                    filter: 'contrast(1.2) brightness(1.1)'
-                                }}
-                            />
-                            {/* Overlay Text */}
-                            <div className="absolute bottom-0 right-0 p-1">
-                                <span className="text-[10px] font-bold font-mono text-black bg-emerald-400 px-1 rounded-sm">
-                                    {(pole.confidence * 100).toFixed(0)}%
-                                </span>
-                            </div>
-                        </div>
-                    </Card>
-                </div>
-
-                {/* 2. THE TETHER LINE */}
-                <div className="h-[80px] w-[2px] bg-gradient-to-b from-emerald-400 via-emerald-500/30 to-transparent shadow-[0_0_10px_#10b981] animate-in zoom-in-y duration-700 origin-bottom"></div>
-
-                {/* 3. THE GROUND DOT */}
-                <div className="relative flex items-center justify-center w-8 h-8 pointer-events-auto cursor-pointer"
+            {/* 1. THE FLOATING CARD */}
+            <div className="animate-in slide-in-from-bottom-10 fade-in duration-700 ease-out group perspective-1000 origin-bottom">
+                <Card
+                    className="w-[180px] backdrop-blur-3xl bg-black/90 border border-emerald-500/50 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-sm overflow-hidden cursor-pointer transition-transform duration-300 hover:scale-110 z-10"
                     onClick={(e) => {
+                        e.preventDefault()
                         e.stopPropagation()
                         onExpand()
                     }}
                 >
-                    <div className="absolute inset-0 border border-emerald-500/30 rounded-full animate-[ping_2s_infinite]"></div>
-                    <div className="w-4 h-4 rounded-full bg-[radial-gradient(circle_at_30%_30%,_#4ade80,_#059669)] shadow-[0_0_20px_#22c55e] relative z-20 ring-1 ring-black/50"></div>
-                </div>
 
+                    {/* Header */}
+                    <div className="px-2 py-1.5 border-b border-white/10 flex justify-between items-center bg-gradient-to-r from-emerald-950 to-black">
+                        <span className="text-[10px] font-mono text-emerald-400 font-bold tracking-widest pl-1">
+                            #{pole.id.slice(-6).toUpperCase()}
+                        </span>
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse box-shadow-[0_0_10px_#10b981]" />
+                    </div>
+
+                    {/* Image */}
+                    <div className="relative h-20 w-full bg-neutral-900 group overflow-hidden">
+                        <div
+                            className="absolute inset-0 bg-cover bg-center transition-transform duration-500 hover:scale-110"
+                            style={{
+                                backgroundImage: `url(${imageUrl})`,
+                                filter: 'contrast(1.2) brightness(1.1)'
+                            }}
+                        />
+                        {/* Overlay Text */}
+                        <div className="absolute bottom-0 right-0 p-1">
+                            <span className="text-[10px] font-bold font-mono text-black bg-emerald-400 px-1 rounded-sm">
+                                {(pole.confidence * 100).toFixed(0)}%
+                            </span>
+                        </div>
+                    </div>
+                </Card>
             </div>
 
-            {/* EXPANDED OVERLAY (Global Fixed Position via Portal conceptually, but rendered here relative to DOM root really) */}
-            {isExpanded && (
-                <div
-                    className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-300"
-                    onClick={(e) => {
-                        e.stopPropagation()
-                        onClose()
-                    }}
-                >
-                    <div
-                        className="relative w-[900px] h-[500px] bg-black border border-emerald-500/50 rounded-xl shadow-2xl overflow-hidden flex animate-in zoom-in-95 duration-300"
-                        onClick={(e) => e.stopPropagation()}
-                    >
+            {/* 2. THE TETHER LINE */}
+            <div className="h-[80px] w-[2px] bg-gradient-to-b from-emerald-400 via-emerald-500/30 to-transparent shadow-[0_0_10px_#10b981] animate-in zoom-in-y duration-700 origin-bottom"></div>
 
-                        {/* LEFT: IMAGE (60%) */}
-                        <div className="w-[60%] h-full relative bg-neutral-900 overflow-hidden border-r border-white/10">
-                            <div
-                                className="w-full h-full bg-no-repeat transition-transform duration-700 hover:scale-105"
-                                style={{
-                                    backgroundImage: `url(${tileUrl})`,
-                                    backgroundSize: `${256 * 2}px ${256 * 2}px`, // 2x base tile
-                                    backgroundPosition: largeBgPos,
-                                    filter: 'contrast(1.1) brightness(1.1)'
-                                }}
-                            />
-                            {/* Reticle */}
-                            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                                <div className="absolute w-[2px] h-20 bg-emerald-500/50"></div>
-                                <div className="absolute w-20 h-[2px] bg-emerald-500/50"></div>
-                                <div className="w-16 h-16 border-2 border-emerald-500/50 rounded-full"></div>
-                                <div className="absolute top-4 left-4 text-xs font-mono text-emerald-500 bg-black/50 px-2 py-1 rounded">
-                                    LIVE SATELLITE FEED // 4K REZ
-                                </div>
-                            </div>
-                        </div>
+            {/* 3. THE GROUND DOT */}
+            <div className="relative flex items-center justify-center w-8 h-8 pointer-events-auto cursor-pointer"
+                onClick={(e) => {
+                    e.stopPropagation()
+                    onExpand()
+                }}
+            >
+                <div className="absolute inset-0 border border-emerald-500/30 rounded-full animate-[ping_2s_infinite]"></div>
+                <div className="w-4 h-4 rounded-full bg-[radial-gradient(circle_at_30%_30%,_#4ade80,_#059669)] shadow-[0_0_20px_#22c55e] relative z-20 ring-1 ring-black/50"></div>
+            </div>
 
-                        {/* RIGHT: DATA (40%) */}
-                        <div className="w-[40%] h-full bg-gradient-to-br from-gray-900 to-black p-8 flex flex-col justify-between">
-                            {/* Close */}
-                            <button
-                                onClick={(e) => { e.stopPropagation(); onClose() }}
-                                className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                            </button>
-
-                            <div>
-                                <h2 className="text-3xl font-black text-white tracking-tight mb-1">ASSET DETECTED</h2>
-                                <div className="text-emerald-400 font-mono text-lg mb-8">ID: {pole.id}</div>
-
-                                <div className="space-y-6">
-                                    <div>
-                                        <div className="text-xs font-mono text-gray-500 mb-1">COORDINATES</div>
-                                        <div className="text-xl font-mono text-white tracking-widest">{pole.lat.toFixed(5)} N</div>
-                                        <div className="text-xl font-mono text-white tracking-widest">{pole.lng.toFixed(5)} W</div>
-                                    </div>
-
-                                    <div>
-                                        <div className="text-xs font-mono text-gray-500 mb-1">CONFIDENCE SCORE</div>
-                                        <div className="flex items-center gap-3">
-                                            <div className="h-2 flex-1 bg-gray-800 rounded-full overflow-hidden">
-                                                <div className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]" style={{ width: `${pole.confidence * 100}%` }}></div>
-                                            </div>
-                                            <span className="text-2xl font-bold text-emerald-400">{(pole.confidence * 100).toFixed(0)}%</span>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <div className="text-xs font-mono text-gray-500 mb-1">STATUS</div>
-                                        <span className="inline-block px-3 py-1 bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 rounded text-sm font-bold tracking-wider">
-                                            VERIFIED ACTIVE
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <Button
-                                className="w-full h-12 bg-white text-black hover:bg-gray-200 font-bold tracking-widest text-sm rounded-sm transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)]"
-                                onClick={() => window.open(`https://www.google.com/maps?q&layer=c&cbll=${pole.lat},${pole.lng}`, '_blank')}
-                            >
-                                OPEN STREET VIEW
-                            </Button>
-                        </div>
-
-                    </div>
-                </div>
-            )}
-        </>
+        </div>
     )
 }
 
@@ -603,9 +482,94 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
             {/* 3D Map Container */}
             <div ref={mapContainer} className="w-full h-full" />
 
-            {/* OVERLAYS */}
+            {/* EXPANDED MODAL (Hoisted out of Map DOM) */}
+            {expandedPole && (
+                 <div 
+                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-300"
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        setExpandedPoleId(null)
+                        isRotatingRef.current = true
+                    }}
+                >
+                    <div 
+                        className="relative w-[900px] h-[500px] bg-black border border-emerald-500/50 rounded-xl shadow-2xl overflow-hidden flex animate-in zoom-in-95 duration-300"
+                        onClick={(e) => e.stopPropagation()} 
+                    >
+                         {/* LEFT: IMAGE (60%) */}
+                        <div className="w-[60%] h-full relative bg-neutral-900 overflow-hidden border-r border-white/10">
+                            <div 
+                                className="w-full h-full bg-cover bg-center transition-transform duration-700 hover:scale-105"
+                                style={{
+                                    backgroundImage: `url(${getStaticMapUrl(expandedPole.lat, expandedPole.lng, 600, 500)})`,
+                                    filter: 'contrast(1.1) brightness(1.1)'
+                                }}
+                            />
+                            {/* Reticle */}
+                            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                                <div className="absolute w-[2px] h-20 bg-emerald-500/50"></div>
+                                <div className="absolute w-20 h-[2px] bg-emerald-500/50"></div>
+                                <div className="w-16 h-16 border-2 border-emerald-500/50 rounded-full"></div>
+                                <div className="absolute top-4 left-4 text-xs font-mono text-emerald-500 bg-black/50 px-2 py-1 rounded">
+                                    LIVE SATELLITE FEED // 4K REZ
+                                </div>
+                            </div>
+                        </div>
 
-            {/* HUD REMOVED as requested */}
+                        {/* RIGHT: DATA (40%) */}
+                        <div className="w-[40%] h-full bg-gradient-to-br from-gray-900 to-black p-8 flex flex-col justify-between">
+                             {/* Close */}
+                             <button 
+                                onClick={(e) => { 
+                                    e.stopPropagation()
+                                    setExpandedPoleId(null)
+                                    isRotatingRef.current = true
+                                }}
+                                className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+
+                            <div>
+                                <h2 className="text-3xl font-black text-white tracking-tight mb-1">ASSET DETECTED</h2>
+                                <div className="text-emerald-400 font-mono text-lg mb-8">ID: {expandedPole.id}</div>
+
+                                <div className="space-y-6">
+                                    <div>
+                                        <div className="text-xs font-mono text-gray-500 mb-1">COORDINATES</div>
+                                        <div className="text-xl font-mono text-white tracking-widest">{expandedPole.lat.toFixed(5)} N</div>
+                                        <div className="text-xl font-mono text-white tracking-widest">{expandedPole.lng.toFixed(5)} W</div>
+                                    </div>
+
+                                    <div>
+                                        <div className="text-xs font-mono text-gray-500 mb-1">CONFIDENCE SCORE</div>
+                                        <div className="flex items-center gap-3">
+                                            <div className="h-2 flex-1 bg-gray-800 rounded-full overflow-hidden">
+                                                <div className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]" style={{ width: `${expandedPole.confidence * 100}%` }}></div>
+                                            </div>
+                                            <span className="text-2xl font-bold text-emerald-400">{(expandedPole.confidence * 100).toFixed(0)}%</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <div className="text-xs font-mono text-gray-500 mb-1">STATUS</div>
+                                        <span className="inline-block px-3 py-1 bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 rounded text-sm font-bold tracking-wider">
+                                            VERIFIED ACTIVE
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <Button 
+                                className="w-full h-12 bg-white text-black hover:bg-gray-200 font-bold tracking-widest text-sm rounded-sm transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)]"
+                                onClick={() => window.open(`https://www.google.com/maps?q&layer=c&cbll=${expandedPole.lat},${expandedPole.lng}`, '_blank')}
+                            >
+                                OPEN STREET VIEW
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Controls (Only in Full Mode) */}
             {mode === 'full' && (
