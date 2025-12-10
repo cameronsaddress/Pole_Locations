@@ -100,25 +100,38 @@ def load_real_assets():
                 impact = 0.0
                 
                 # Logic: Real classification + Context (Road Dist) = Ops Level
-                is_near_road = road_distance_m < 15.0
+                is_near_road = road_distance_m < 20.0 # Increased risk zone
                 
                 if status == "verified_good" or status == "Verified":
                     status = "Verified"
                     health = 1.0
                     impact = 0.0
                 else:
-                    # It is "needs_review" or "in_question"
+                    # "In Question" or "Needs Review"
+                    
+                    # 1. CRITICAL ROAD RISK (Lean/Structural)
                     if is_near_road:
                         status = "Critical"
-                        issues.append(f"Road Risk (Dist: {int(road_distance_m)}m)")
-                        issues.append("Visual Anomaly")
-                        health = 0.4
-                        impact = 25000.0 # High liability cost
+                        issues.append("Severe Lean / Structural Risk")
+                        issues.append(f"Proximity Alert ({int(road_distance_m)}m to Road)")
+                        health = 0.35
+                        impact = 45000.0 # Liability + Emergency Crew
+                    
+                    # 2. VEGETATION (Low confidence implies obstruction)
+                    elif conf < 0.6:
+                        status = "Flagged"
+                        issues.append("Vegetation Encroachment")
+                        issues.append("Obstructed View")
+                        health = 0.6
+                        impact = 5000.0 # Trim crew
+                        
+                    # 3. EQUIPMENT/MAINTENANCE (Medium confidence implies visible but odd)
                     else:
                         status = "Flagged"
-                        issues.append("Visual Anomaly")
-                        health = 0.7
-                        impact = 2000.0 # Inspection cost
+                        issues.append("Insulator/Crossarm Damage")
+                        issues.append("Equipment Audit Required")
+                        health = 0.75
+                        impact = 2500.0 # Inspection crew
 
                 # Overwrite status for UI if critical
                 ui_status = status
