@@ -324,8 +324,10 @@ async def run_production_inference(limit: int = 15, task: str = "full"):
     job_context["is_running"] = True
     job_context["trials_queue"] = []
     
-    script_path = "src/training/run_production_job.py"
-    cmd = [sys.executable, script_path, "--limit", str(limit), "--task", task]
+    # script_path = "src/training/run_production_job.py"
+    # Execute in GPU Container
+    container_script_path = "/workspace/src/training/run_production_job.py"
+    cmd = ["/usr/bin/docker", "exec", "polelocations-gpu", "python", "-u", container_script_path, "--limit", str(limit), "--task", task]
     
     logger.info(f"Starting Production Deployment: {cmd}")
     
@@ -335,6 +337,7 @@ async def run_production_inference(limit: int = 15, task: str = "full"):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
+        job_context["current_process"] = process
         
         job_context["trials_queue"].append({
             "type": "log",
@@ -387,6 +390,7 @@ async def run_production_inference(limit: int = 15, task: str = "full"):
         })
     finally:
         job_context["is_running"] = False
+        job_context["current_process"] = None
 
 @router.post("/deploy/detector")
 async def deploy_detector(background_tasks: BackgroundTasks):

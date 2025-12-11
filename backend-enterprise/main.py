@@ -52,9 +52,9 @@ async def training_endpoint(websocket: WebSocket):
     
     def get_real_gpu_metrics():
         try:
-            # Query nvidia-smi for real data
+            # Query nvidia-smi for real data from the GPU container
             result = subprocess.run(
-                ['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,power.draw', '--format=csv,noheader,nounits'],
+                ['/usr/bin/docker', 'exec', 'polelocations-gpu', 'nvidia-smi', '--query-gpu=utilization.gpu,memory.used,power.draw', '--format=csv,noheader,nounits'],
                 capture_output=True, text=True
             )
             output = result.stdout.strip()

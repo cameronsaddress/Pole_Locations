@@ -68,11 +68,13 @@ export default function Training() {
     const [isClassifierDeploying, setIsClassifierDeploying] = useState(false)
     const [trials, setTrials] = useState<any[]>([])
     const [telemetry, setTelemetry] = useState({ gpu: 0, vram: 0, power: 0, status: "Idle" })
+    const [lastProgress, setLastProgress] = useState<string | null>(null)
     const logsEndRef = useRef<HTMLDivElement>(null)
 
     const startDetectorDeployment = async () => {
         setIsDetectorDeploying(true)
         setTrials([])
+        setLastProgress(null)
         try {
             const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
             const res = await fetch(`${apiHost}/api/v2/training/deploy/detector`, {
@@ -110,6 +112,7 @@ export default function Training() {
         setIsStarting(true)
         setTrials([]) // Clear previous trials
         setStats(null)
+        setLastProgress(null)
         try {
             const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
             const res = await fetch(`${apiHost}/api/v2/training/start`, {
@@ -208,7 +211,11 @@ export default function Training() {
                         })
                     }
                 } else if (data.type === 'log') {
-                    setLogs(prev => [...prev, `[REMOTE] ${data.payload}`])
+                    const msg = data.payload
+                    setLogs(prev => [...prev, `[REMOTE] ${msg}`])
+                    if (typeof msg === 'string' && (msg.includes("Batch") || msg.includes("Processing Tile"))) {
+                        setLastProgress(msg)
+                    }
                 } else if (data.type === 'trial') {
                     // Grok Optimization Trial
                     setTrials(prev => {
@@ -251,7 +258,7 @@ export default function Training() {
                 </div>
                 <Badge variant="outline" className="text-lg px-4 py-1 border-cyan-500 text-cyan-500 animate-pulse">
                     <Activity className="mr-2 h-4 w-4" />
-                    {telemetry?.status === "Training" ? (stats ? `Training Active: Epoch ${stats.epoch}/${stats.total_epochs || 20}` : "Training Active (Initializing...)") : (trials.length > 0 ? "Tuning Active" : "System Idle")}
+                    {telemetry?.status === "Training" ? (stats ? `Training Active: Epoch ${stats.epoch}/${stats.total_epochs || 20}` : (lastProgress || "Training Active (Initializing...)")) : (trials.length > 0 ? "Tuning Active" : "System Idle")}
                 </Badge>
             </div>
 
