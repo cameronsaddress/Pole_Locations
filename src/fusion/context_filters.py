@@ -22,27 +22,37 @@ from src.config import (
 )
 
 
+from src.ingestion.connectors.pasda_roads import PASDAConnector
+
 def annotate_with_roads(
     detections_df: pd.DataFrame,
     roads_path: Optional[Path] = None,
 ) -> pd.DataFrame:
-    """Append nearest-road distance (meters) to each detection if roads data is available."""
-    if roads_path is None:
+    """Append nearest-road distance (meters) to each detection."""
+    
+    # Try PASDA first (Superior for PA)
+    pasda = PASDAConnector()
+    if pasda.get_roads_gdf() is not None:
+        roads_gdf = pasda.get_roads_gdf()
+    elif roads_path is None:
+        # Fallback to OSM
         roads_path = PROCESSED_DATA_DIR / "roads_osm.geojson"
+        if roads_path.exists():
+            roads_gdf = gpd.read_file(roads_path)
+        else:
+            roads_gdf = gpd.GeoDataFrame()
+    else:
+        roads_gdf = gpd.read_file(roads_path)
 
-    if not roads_path.exists() or detections_df.empty:
+    if roads_gdf.empty or detections_df.empty:
         detections_df = detections_df.copy()
         detections_df["road_distance_m"] = pd.NA
         return detections_df
-
-    roads_gdf = gpd.read_file(roads_path)
-    if roads_gdf.empty:
-        detections_df = detections_df.copy()
-        detections_df["road_distance_m"] = pd.NA
-        return detections_df
-
+    
+    # ... Rest of logic stays similar but using the selected gdf ...
     roads_gdf = roads_gdf[["geometry"]].dropna().reset_index(drop=True)
     roads_crs = roads_gdf.crs or "EPSG:4326"
+
 
     detections_gdf = gpd.GeoDataFrame(
         detections_df.copy(),

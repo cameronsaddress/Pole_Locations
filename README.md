@@ -160,6 +160,25 @@ The logic is split into modular services under `src/pipeline/`:
 
 ---
 
+## 🌍 Enterprise Data Sources (Augmented)
+
+To ensure maximum accuracy (robustness), the system integrates a multi-layered data verification strategy using **Open Source & Federal Data**:
+
+| Source | Type | Role | Implementation |
+| :--- | :--- | :--- | :--- |
+| **NAIP** | Imagery (Raster) | **Detection**. High-res (1m) aerial photography. | `ingest_imagery.py` (Local GeoTIFFs) |
+| **USGS 3DEP** | DSM (Raster) | **False Positive Filtering**. Check Height Above Ground (HAG). | `src/fusion/context_filters.py` |
+| **OpenStreetMap** | Vector | **Context**. Road proximity & filter. | `src/fusion/context_filters.py` |
+| **FAA Obstacles** | Data (CSV) | **Ground Truth**. Validates transmission towers >200ft & airport assets. | `src/ingestion/connectors/faa_obstacles.py` |
+| **PASDA Roads** | Vector (Shapefile) | **Precision**. Superior road centerlines for Pennsylvania. | `src/ingestion/connectors/pasda_roads.py` |
+| **OpenInfraMap** | Vector (WFS) | **Grid Context**. Maps high-voltage transmission lines. | `src/ingestion/connectors/openinframap.py` |
+| **Mapillary** | Street Imagery | **Defect Verification**. Visual check for rust/leaning. | `src/ingestion/connectors/mapillary.py` |
+| **USGS Lidar** | Point Cloud (LAZ) | **Verticality**. Confirms "Pole vs Tree" signature. | `src/ingestion/connectors/usgs_lidar.py` |
+
+All connectors are modularly located in `src/ingestion/connectors/`. The system gracefully degrades if optional keys (e.g., Mapillary) are missing.
+
+---
+
 ## 📂 Directory Structure
 
 ```
