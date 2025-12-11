@@ -59,12 +59,19 @@ async def training_endpoint(websocket: WebSocket):
             )
             output = result.stdout.strip()
             if output:
-                # Output format example: "0, 4, 10" (0% gpu, 4mb mem, 10w power)
-                parts = output.split(',')
+                # Output format example: "0, 4, 10" or "95, [N/A], 52.78"
+                parts = [p.strip() for p in output.split(',')]
+                
+                def safe_parse(val, type_func):
+                    try:
+                        return type_func(val)
+                    except:
+                        return 0
+
                 return {
-                    "gpu": int(parts[0]),
-                    "vram": int(parts[1]) / 1024, # Convert MB to GB roughly for UI scaling
-                    "power": int(float(parts[2]))
+                    "gpu": safe_parse(parts[0], int),
+                    "vram": safe_parse(parts[1], float) / 1024, # MB to GB
+                    "power": safe_parse(parts[2], float)
                 }
         except Exception:
             pass
