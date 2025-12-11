@@ -47,7 +47,7 @@ async def run_script(script_path: str, args: list):
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+        stderr=asyncio.subprocess.STDOUT
     )
     
     # Allow cancellation
@@ -335,7 +335,7 @@ async def run_production_inference(limit: int = 15, task: str = "full"):
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.STDOUT
         )
         job_context["current_process"] = process
         
