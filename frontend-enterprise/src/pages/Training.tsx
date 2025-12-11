@@ -435,6 +435,29 @@ export default function Training() {
                         </div>
                     )}
 
+                    {/* System Logs */}
+                    <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                            <Terminal className="w-4 h-4 text-green-500" />
+                            <h3 className="text-sm font-bold text-green-500">System Logs</h3>
+                        </div>
+                        <div ref={logsEndRef} className="bg-black/90 font-mono text-xs p-4 rounded h-[400px] overflow-y-auto border border-gray-800 shadow-inner">
+                            {logs.length === 0 ? (
+                                <span className="text-gray-600 italic">Awating process output...</span>
+                            ) : (
+                                logs.map((log, i) => (
+                                    <div key={i} className="mb-1 break-all">
+                                        <span className="text-gray-500 text-[10px] mr-2">[{new Date().toLocaleTimeString()}]</span>
+                                        <span className={log.includes("[ERR]") ? "text-red-400" : log.includes("[EXEC]") ? "text-cyan-300" : "text-gray-300"}>
+                                            {log}
+                                        </span>
+                                    </div>
+                                ))
+                            )}
+                            <div ref={logsEndRef} />
+                        </div>
+                    </div>
+
                     <div className="grid gap-6 md:grid-cols-2">
                         {/* Loss Chart */}
                         <Card className="backdrop-blur-sm bg-card/50 border-primary/10">
