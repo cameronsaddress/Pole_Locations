@@ -65,6 +65,7 @@ class Tile(SQLModel, table=True):
     path: str = Field(unique=True)
     bbox: Any = Field(sa_column=Column(Geometry("POLYGON", srid=4326)))
     status: str = Field(default="Pending")
+    retry_count: int = Field(default=0)
     last_processed_at: Optional[datetime] = None
     
     class Config:

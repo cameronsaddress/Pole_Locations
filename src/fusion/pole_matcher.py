@@ -16,6 +16,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.config import (
     VERIFIED_DISTANCE_THRESHOLD, VERIFIED_CONFIDENCE_THRESHOLD,
     IN_QUESTION_CONFIDENCE_THRESHOLD, MATCH_THRESHOLD_METERS,
+    MOVED_THRESHOLD_METERS,
     WEIGHT_IMAGERY, WEIGHT_RECENCY, WEIGHT_DISTANCE,
     RECENCY_WEIGHTS, PROCESSED_DATA_DIR, EXPORTS_OUTPUT_DIR
 )
@@ -193,6 +194,9 @@ class PoleMatcher:
                     'detection_confidence': detection.get('confidence', 0.5),
                     'detection_ndvi': detection.get('ndvi'),
                     'road_distance_m': detection.get('road_distance_m'),
+                    'class_name': detection.get('class_name'), # Pass through CLIP classification
+                    'height_ag_m': detection.get('height_ag_m'), # 3D Validation
+                    'surface_elev_m': detection.get('surface_elev_m'),
 
                     # Historical info
                     'pole_id': historical_record.get('pole_id', 'UNKNOWN'),
@@ -221,6 +225,9 @@ class PoleMatcher:
                     'detection_confidence': detection.get('confidence', 0.5),
                     'detection_ndvi': detection.get('ndvi'),
                     'road_distance_m': detection.get('road_distance_m'),
+                    'class_name': detection.get('class_name'),
+                    'height_ag_m': detection.get('height_ag_m'), # 3D Validation
+                    'surface_elev_m': detection.get('surface_elev_m'),
                     'pole_id': None,
                     'historical_lat': None,
                     'historical_lon': None,
@@ -261,6 +268,19 @@ class PoleMatcher:
         ].copy()
         verified_good['classification'] = 'verified_good'
 
+        # Moved Poles: Matched to history but significantly displaced (> 2.0m)
+        moved_poles = matched_df[
+            (matched_df['match_distance_m'] >= MOVED_THRESHOLD_METERS) &
+            (matched_df['match_distance_m'] < float('inf')) &
+            (~matched_df.index.isin(verified_good.index))
+        ].copy()
+        moved_poles['classification'] = 'moved_pole'
+        # Add displacement vector note
+        moved_poles['notes'] = moved_poles.apply(
+            lambda row: f"Displaced by {row['match_distance_m']:.1f}m from historical record {row['pole_id']}", 
+            axis=1
+        )
+
         # New/Missing: No historical match OR historical pole with no detection
         new_missing = matched_df[
             (matched_df['pole_id'].isna()) |
@@ -271,6 +291,7 @@ class PoleMatcher:
         # In Question: Everything else
         in_question = matched_df[
             ~matched_df.index.isin(verified_good.index) &
+            ~matched_df.index.isin(moved_poles.index) &
             ~matched_df.index.isin(new_missing.index)
         ].copy()
         in_question['classification'] = 'in_question'
@@ -285,11 +306,13 @@ class PoleMatcher:
 
         logger.info(f"Classification results:")
         logger.info(f"  Verified Good: {len(verified_good)} ({len(verified_good)/len(matched_df)*100:.1f}%)")
+        logger.info(f"  Moved Poles: {len(moved_poles)} ({len(moved_poles)/len(matched_df)*100:.1f}%)")
         logger.info(f"  In Question: {len(in_question)} ({len(in_question)/len(matched_df)*100:.1f}%)")
         logger.info(f"  New/Missing: {len(new_missing)} ({len(new_missing)/len(matched_df)*100:.1f}%)")
 
         return {
             'verified_good': verified_good,
+            'moved_poles': moved_poles,
             'in_question': in_question,
             'new_missing': new_missing
         }

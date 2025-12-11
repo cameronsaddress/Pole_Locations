@@ -377,6 +377,8 @@ class PoleDetector:
             candidates.append(Path(model_path))
 
         candidates.extend([
+            CHECKPOINTS_DIR / "yolo11l_pole_v1" / "weights" / "best.pt",
+            MODELS_DIR / "pole_detector_real.pt",
             # Legacy checkpoints removed to enforce YOLO11 usage
             # MODELS_DIR / "yolov8l_v1" / "weights" / "best.pt",
             # MODELS_DIR / "pole_detector_v7" / "weights" / "best.pt",
@@ -559,15 +561,16 @@ class PoleDetector:
         return (lat_m ** 2 + lon_m ** 2) ** 0.5
 
     def detect_tiles(self, tile_paths: List[Path], crop_size: int = 640,
-                     stride: int = 512, duplicate_threshold_m: float = 6.0) -> List[Dict]:
+                     stride: int = 512, duplicate_threshold_m: float = 6.0, batch_size: int = 32) -> List[Dict]:
         """
-        Run detection across large GeoTIFF tiles using a sliding window.
+        Run detection across large GeoTIFF tiles using a sliding window with batched inference.
 
         Args:
             tile_paths: List of NAIP tile paths.
             crop_size: Size of inference window in pixels.
             stride: Sliding window stride in pixels.
             duplicate_threshold_m: Suppress detections within this distance.
+            batch_size: Number of windows to process in a single GPU inference pass.
 
         Returns:
             List of detection dictionaries with lat/lon + confidence.
@@ -577,7 +580,7 @@ class PoleDetector:
         total_windows = 0
 
         logger.info(f"Running full-tile detection on {len(tile_paths)} tiles "
-                    f"(crop={crop_size}px, stride={stride}px)")
+                    f"(crop={crop_size}px, stride={stride}px, batch={batch_size})")
 
         for tile_path in tile_paths:
             with rasterio.open(tile_path) as src:
@@ -587,6 +590,10 @@ class PoleDetector:
 
                 logger.info(f"[Tile] {tile_path.name}: {width}x{height}px, CRS={crs}")
 
+                # Accumulators for batching
+                batch_images = []
+                batch_meta = [] # (col, row)
+
                 row = 0
                 while row < height:
                     col = 0
@@ -594,160 +601,195 @@ class PoleDetector:
                         window = Window(col, row,
                                         min(crop_size, width - col),
                                         min(crop_size, height - row))
+                        
+                        # Advance col loop variable for next iteration, but keep current col for processing
+                        current_col = col
+                        col += stride
+
                         try:
                             data = src.read([1, 2, 3], window=window)
                         except rasterio.errors.RasterioIOError as err:
                             logger.warning(f"[Tile] {tile_path.name} window "
-                                           f"({col},{row},{window.width},{window.height}) "
-                                           f"failed to read: {err}")
-                            col += stride
-                            continue
-                        if data.size == 0:
-                            col += stride
+                                           f"({current_col},{row}) failed to read: {err}")
                             continue
 
-                        # Skip blank/low-information windows to save inference
-                        if data.mean() < 12:
-                            col += stride
+                        if data.size == 0:
                             continue
+
+                        # Skip blank/low-information windows
+                        if data.mean() < 12:
+                            continue
+                            
+                        # Pad image if it's smaller than crop_size (edge cases)
+                        # Ultralytics handles different sizes, but consistent batch shapes are better
+                        if data.shape[1] != crop_size or data.shape[2] != crop_size:
+                             # simple padding or just let YOLO handle it. 
+                             # For simplicity, we just pass the valid data. 
+                             # Note: YOLOv8 can handle list of varied sizes, but list of arrays is flexible.
+                             pass
 
                         image = np.transpose(data, (1, 2, 0))
-                        results = self.model.predict(
-                            source=image,
-                            conf=self.confidence,
-                            iou=self.iou,
-                            augment=self.augment,
-                            verbose=False,
-                            device=self.device
-                        )
+                        
+                        batch_images.append(image)
+                        batch_meta.append((current_col, row))
 
-                        for result in results:
-                            boxes = result.boxes
-                            if boxes is None:
-                                continue
+                        # If batch is full, execute inference
+                        if len(batch_images) >= batch_size:
+                             self._process_batch(batch_images, batch_meta, detections, seen_coords, 
+                                                 duplicate_threshold_m, transform, crs, tile_path, crop_size)
+                             total_windows += len(batch_images)
+                             batch_images = []
+                             batch_meta = []
 
-                            for idx in range(len(boxes)):
-                                conf = float(boxes.conf[idx].cpu().numpy())
-                                if conf < self.confidence:
-                                    continue
-
-                                x1, y1, x2, y2 = boxes.xyxy[idx].cpu().numpy()
-                                center_local_x = (x1 + x2) / 2
-                                center_local_y = (y1 + y2) / 2
-                                center_global_x = col + center_local_x
-                                center_global_y = row + center_local_y
-
-                                # EDGE FILTERING:
-                                # Discard detections near the edge of the inference crop to avoid artifacts.
-                                # Rely on overlapping windows to capture these as centered objects.
-                                edge_margin = 32
-                                is_edge_x = (x1 < edge_margin) or (x2 > crop_size - edge_margin)
-                                is_edge_y = (y1 < edge_margin) or (y2 > crop_size - edge_margin)
-                                
-                                # Check if we are at the real boundary of the large image
-                                at_image_left = (col == 0)
-                                at_image_top = (row == 0)
-                                at_image_right = (col + crop_size >= width)
-                                at_image_bottom = (row + crop_size >= height)
-
-                                # If near edge, drop it UNLESS it's a real image boundary
-                                if is_edge_x:
-                                    if (x1 < edge_margin and not at_image_left) or \
-                                       (x2 > crop_size - edge_margin and not at_image_right):
-                                        continue
-                                
-                                if is_edge_y:
-                                    if (y1 < edge_margin and not at_image_top) or \
-                                       (y2 > crop_size - edge_margin and not at_image_bottom):
-                                        continue
-
-                                lat, lon = self.pixel_to_latlon(
-                                    (center_global_x, center_global_y),
-                                    transform,
-                                    crs
-                                )
-
-                                # Deduplicate nearby detections from overlapping windows
-                                if any(
-                                    self._approx_distance_m(lat, lon, s_lat, s_lon) <
-                                    duplicate_threshold_m
-                                    for s_lat, s_lon in seen_coords
-                                ):
-                                    continue
-
-                                ndvi_value = self._sample_ndvi(src, center_global_x, center_global_y)
-                                
-                                # Default Class
-                                class_name = "utility_pole"
-                                
-                                # --- ZERO-SHOT CLASSIFICATION ---
-                                if self.classifier:
-                                    try:
-                                        # Crop from local window `image` using local box coords
-                                        h_img, w_img, _ = image.shape
-                                        ix1, iy1 = max(0, int(x1)), max(0, int(y1))
-                                        ix2, iy2 = min(w_img, int(x2)), min(h_img, int(y2))
-                                        
-                                        if ix2 > ix1 and iy2 > iy1:
-                                            # image is typically RGB from rasterio read([1,2,3])
-                                            crop = image[iy1:iy2, ix1:ix2]
-                                            # Converting numpy array to PIL
-                                            # Ensure uint8
-                                            if crop.dtype != np.uint8:
-                                                # NAIP is usually 8-bit, but just in case
-                                                crop = (crop / crop.max() * 255).astype(np.uint8)
-                                            
-                                            pil_crop = Image.fromarray(crop)
-                                            
-                                            # Pass image as positional argument 1
-                                            clip_result = self.classifier(pil_crop, candidate_labels=self.classification_labels)
-                                            top_label = clip_result[0]['label']
-                                            top_score = clip_result[0]['score']
-
-                                            if top_score > 0.35: # Slightly lower threshold for specific features
-                                                if "leaning" in top_label:
-                                                    class_name = "pole_leaning"
-                                                elif "vegetation" in top_label:
-                                                    class_name = "pole_vegetation"
-                                                elif "damaged" in top_label or "broken" in top_label:
-                                                    class_name = "pole_damage"
-                                                elif "rusted" in top_label:
-                                                    class_name = "pole_rust"
-                                                elif "bird nest" in top_label:
-                                                    class_name = "pole_nest"
-                                                else:
-                                                    class_name = "pole_good"
-                                            else:
-                                                # If we are detecting a pole but CLIP isn't sure of a defect, call it good
-                                                class_name = "pole_good"
-                                                
-                                    except Exception as e:
-                                        logger.debug(f"CLIP Classification Error: {e}")
-                                        pass
-
-                                detections.append({
-                                    'pole_id': f"AI_DET_{tile_path.stem}_{len(detections) + 1}",
-                                    'lat': lat,
-                                    'lon': lon,
-                                    'ai_confidence': conf,
-                                    'tile_path': str(tile_path),
-                                    'pixel_x': float(center_global_x),
-                                    'pixel_y': float(center_global_y),
-                                    'bbox': [float(x1 + col), float(y1 + row),
-                                             float(x2 + col), float(y2 + row)],
-                                    'source': 'ai_detection',
-                                    'ndvi': ndvi_value,
-                                    'class_name': class_name
-                                })
-                                seen_coords.append((lat, lon))
-
-                        total_windows += 1
-                        col += stride
                     row += stride
+
+                # Process remaining windows in batch
+                if batch_images:
+                     self._process_batch(batch_images, batch_meta, detections, seen_coords, 
+                                         duplicate_threshold_m, transform, crs, tile_path, crop_size)
+                     total_windows += len(batch_images)
+                     batch_images = []
+                     batch_meta = []
+
 
         logger.info(f"Tile detection complete: {len(detections)} unique poles "
                     f"from {total_windows} windows.")
         return detections
+
+    def _process_batch(self, images, meta, detections, seen_coords, duplicate_threshold_m, transform, crs, tile_path, crop_size):
+        """Helper to run inference on a batch and process results."""
+        results = self.model.predict(
+            source=images,
+            conf=self.confidence,
+            iou=self.iou,
+            augment=self.augment,
+            verbose=False,
+            device=self.device
+        )
+
+        # Temporary storage for batching classification
+        potential_detections = []
+        crops_to_classify = []
+        crop_indices = []
+
+        for i, result in enumerate(results):
+            col, row = meta[i]
+            image = images[i]  # RGB Image (from src.read)
+
+            boxes = result.boxes
+            if boxes is None:
+                continue
+
+            for idx in range(len(boxes)):
+                conf = float(boxes.conf[idx].cpu().numpy())
+                if conf < self.confidence:
+                    continue
+
+                x1, y1, x2, y2 = boxes.xyxy[idx].cpu().numpy()
+                center_local_x = (x1 + x2) / 2
+                center_local_y = (y1 + y2) / 2
+                center_global_x = col + center_local_x
+                center_global_y = row + center_local_y
+
+                # EDGE FILTERING:
+                edge_margin = 32
+                is_edge_x = (x1 < edge_margin) or (x2 > crop_size - edge_margin)
+                is_edge_y = (y1 < edge_margin) or (y2 > crop_size - edge_margin)
+                
+                if is_edge_x or is_edge_y:
+                    continue
+
+                lat, lon = self.pixel_to_latlon(
+                    (center_global_x, center_global_y),
+                    transform,
+                    crs
+                )
+
+                # Deduplicate
+                if any(
+                    self._approx_distance_m(lat, lon, s_lat, s_lon) <
+                    duplicate_threshold_m
+                    for s_lat, s_lon in seen_coords
+                ):
+                    continue
+                
+                # Prepare detection object (pre-classification)
+                det_obj = {
+                    'pole_id': f"AI_DET_{tile_path.stem}_{len(detections) + len(potential_detections) + 1}",
+                    'lat': lat,
+                    'lon': lon,
+                    'ai_confidence': conf,
+                    'tile_path': str(tile_path),
+                    'pixel_x': float(center_global_x),
+                    'pixel_y': float(center_global_y),
+                    'bbox': [float(x1 + col), float(y1 + row),
+                             float(x2 + col), float(y2 + row)],
+                    'source': 'ai_detection',
+                    'ndvi': None,
+                    'class_name': 'utility_pole' # Default
+                }
+                
+                # Collect Crop for CLIP
+                if self.classifier:
+                    h_img, w_img, _ = image.shape
+                    ix1, iy1 = max(0, int(x1)), max(0, int(y1))
+                    ix2, iy2 = min(w_img, int(x2)), min(h_img, int(y2))
+                    
+                    if ix2 > ix1 and iy2 > iy1:
+                        crop = image[iy1:iy2, ix1:ix2]
+                        # Fix Dtype if needed
+                        if crop.dtype != np.uint8:
+                            if crop.max() <= 1.0:
+                                crop = (crop * 255).astype(np.uint8)
+                            else:
+                                crop = crop.astype(np.uint8)
+                        
+                        pil_crop = Image.fromarray(crop)
+                        crops_to_classify.append(pil_crop)
+                        crop_indices.append(len(potential_detections))
+
+                potential_detections.append(det_obj)
+                seen_coords.append((lat, lon))
+
+        # --- BATCHED ZERO-SHOT CLASSIFICATION ---
+        if self.classifier and crops_to_classify:
+            try:
+                # Run batch inference
+                # batch_size=32 is a safe default for CLIP on standard GPUs
+                clip_results = self.classifier(crops_to_classify, candidate_labels=self.classification_labels, batch_size=32)
+                
+                for idx_in_batch, res in zip(crop_indices, clip_results):
+                    # res is a list of {'label': ..., 'score': ...} or a dict if single label?
+                    # Pipeline typically returns a dict 'labels': [], 'scores': [] or list of dicts. 
+                    # For zero-shot-image-classification it returns list of dicts if single input, or list of lists if multiple?
+                    # Actually standard pipeline output for multiple images is a list of dicts.
+                    
+                    # HuggingFace pipeline format for zero-shot image:
+                    # [{'label': 'leaning...', 'score': 0.9}, ...] -> No, it returns one dict per image with 'labels' and 'scores' lists
+                    # Let's verify standard behavior. usually: {'labels': [...], 'scores': [...]}
+                    
+                    top_label = res['labels'][0]
+                    top_score = res['scores'][0]
+                    
+                    if top_score > self.classification_confidence:
+                        class_name = "pole_good"
+                        if "leaning" in top_label:
+                            class_name = "pole_leaning"
+                        elif "vegetation" in top_label:
+                            class_name = "pole_vegetation"
+                        elif "damaged" in top_label or "broken" in top_label:
+                            class_name = "pole_damage"
+                        elif "rusted" in top_label:
+                            class_name = "pole_rust"
+                        elif "bird nest" in top_label or "animal nest" in top_label:
+                            class_name = "pole_nest"
+                        
+                        potential_detections[idx_in_batch]['class_name'] = class_name
+                        
+            except Exception as e:
+                logger.error(f"Batched CLIP failed: {e}")
+
+        detections.extend(potential_detections)
 
     @staticmethod
     def _sample_ndvi(src: rasterio.DatasetReader, x: float, y: float) -> Optional[float]:

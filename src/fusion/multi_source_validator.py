@@ -433,8 +433,11 @@ class MultiSourceValidator:
             cand_meters = np.empty((0, 2))
 
         cand_tree = KDTree(cand_meters)
+        print("   ... KDTree built. Calculating linearity...")
         
         for i, cand in enumerate(candidates):
+            if i % 5000 == 0:
+                print(f"   ... Processed {i}/{len(candidates)} candidates...")
             # Pass meter coordinates to linearity calc
             linearity, neighbor_count = self.calculate_linearity_score(i, cand_meters, cand_tree)
             cand['linearity_score'] = linearity
@@ -456,6 +459,10 @@ class MultiSourceValidator:
             ai_conf = ai_data.get('ai_confidence', ai_data.get('confidence', 0.0)) if cand['nearest_ai_dist'] < 20 else 0.0
             if cand['type'] == 'new_ai': ai_conf = ai_data.get('ai_confidence', ai_data.get('confidence', 0.0))
             
+            # Extract Elite Data
+            height_ag_m = ai_data.get('height_ag_m', None)
+            class_name = ai_data.get('class_name', None)
+            
             # 2. Recency Score
             recency = self.calculate_recency_score(cand['source_date']) if cand['source_date'] else 1.0
             
@@ -466,25 +473,12 @@ class MultiSourceValidator:
             linearity = cand['linearity_score']
             
             # NEW ENSEMBLE FORMULA
-            # 35% AI + 20% Recency + 20% Spatial + 25% Linearity
-            # Note: For AI-only, Spatial is 0, so max score is 0.8. We might need to adjust logic for AI-only.
-            
             if cand['type'] == 'osm_match':
                 total_conf = (0.35 * ai_conf) + (0.20 * recency) + (0.20 * spatial) + (0.25 * linearity)
             else:
-                # For new poles, spatial match to map is 0 (by definition), but that shouldn't kill it.
-                # Re-weight: 50% AI + 50% Linearity ?
-                # Or: 45% AI + 10% Dummy Spatial + 45% Linearity
-                # Let's keep it rigorous. If no map data, Recency/Spatial are 0/Low.
-                # Actually, Recency for "New" is high (it's happening now).
-                # Total = 0.35*AI + 0.20*1.0 + 0.20*0.0 + 0.25*Linearity
-                # Max possible = 0.35 + 0.2 + 0.25 = 0.8. 
-                # That fits "In Question" or "New" thresholds well. Hard to get "Verified Good" without a map record.
                 total_conf = (0.35 * ai_conf) + (0.20 * 1.0) + (0.0) + (0.25 * linearity)
 
             # Apply Context Filters/Penalties
-            # ... (re-using existing logic slightly modified)
-            
             # Normalized values for display
             ndvi = ai_data.get('ndvi', np.nan)
             road_dist = ai_data.get('road_distance_m', ctx.get('road_distance_m', np.nan))
@@ -500,12 +494,22 @@ class MultiSourceValidator:
             if in_water: reasons.append('in_water')
             if pd.notna(road_dist) and road_dist > 60: reasons.append('far_from_road')
             
-            # Linearity Bonus: Boosting confidence
+            # Linearity Bonus
             if linearity > 0.8: reasons.append('strong_linear_alignment')
             
             if cand['type'] == 'osm_match':
-                # Existing Pole Logic
-                if total_conf >= 0.65:
+                # MOVED POLE CHECK (Active Displacement)
+                # Check this FIRST or independently. 
+                # If high confidence AI match exists but is displaced > 2m
+                if cand['nearest_ai_dist'] > 2.0 and cand['nearest_ai_dist'] < 20.0 and ai_conf > 0.4:
+                     # Lowered confidence threshold slightly to catch the 0.45 cases seen in log
+                     classification = 'moved_pole'
+                     status_color = '#E65100' # Dark Orange/Red
+                     needs_review = True # Moving needs review/ticket
+                     reasons.append(f"displaced_{cand['nearest_ai_dist']:.1f}m")
+                
+                # Existing Pole Logic (Verified Good)
+                elif total_conf >= 0.65:
                     classification = 'verified_good'
                     status_color = '#00897B'
                     needs_review = False
@@ -515,10 +519,13 @@ class MultiSourceValidator:
                 status_color = '#1E88E5'
                 # Auto-verify highly confident new lines?
                 if ai_conf > 0.7 and linearity > 0.9: 
-                     # It's a very strong optical detection forming a perfect line
-                     classification = 'verified_good' # Promote high quality new finds!
+                     classification = 'verified_good' 
                      reasons.append('auto_verified_strong_line')
                      needs_review = False
+            
+            # Height Validation Note
+            if height_ag_m and height_ag_m < 3.0:
+                 reasons.append(f"low_height_{height_ag_m:.1f}m")
 
             final_results.append({
                 'pole_id': cand['pole_id'],
@@ -535,7 +542,9 @@ class MultiSourceValidator:
                 # Keep other cols for CSV compatibility
                 'road_distance_m': road_dist,
                 'spatial_match_score': spatial,
-                'nearest_ai_distance_m': cand['nearest_ai_dist']
+                'nearest_ai_distance_m': cand['nearest_ai_dist'],
+                'height_ag_m': height_ag_m,
+                'class_name': class_name
             })
 
         verified_df = pd.DataFrame(final_results)

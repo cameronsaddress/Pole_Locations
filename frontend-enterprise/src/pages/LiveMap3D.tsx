@@ -11,6 +11,8 @@ interface Asset {
     lng: number
     status: string
     confidence: number
+    issues?: string[]
+    height_m?: number
 }
 
 // Helper to get Centered Static Map Image (Export API)
@@ -26,10 +28,9 @@ const getStaticMapUrl = (lat: number, lng: number, width: number, height: number
 // ----------------------------------------------------------------------------
 // FLOATING MARKER COMPONENT
 // ----------------------------------------------------------------------------
-const PoleMarker = ({ pole, onExpand, onClose, isExpanded }: {
+const PoleMarker = ({ pole, onExpand, isExpanded }: {
     pole: Asset,
     onExpand: () => void,
-    onClose?: () => void,
     isExpanded: boolean
 }) => {
     // Fetch a centered 200x200 thumbnail
@@ -107,7 +108,6 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
     // Street View Panel State
     const [streetViewOpen, setStreetViewOpen] = useState(false)
-    const [svLoading, setSvLoading] = useState(false)
 
     // Derived selected pole
     const expandedPole = activePoles.find(p => p.id === expandedPoleId)
@@ -139,18 +139,20 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
     }
     const handleMouseUp = () => setImgState(prev => ({ ...prev, dragging: false }))
 
+    // ...
+
     // Auto-open Street View on Expand
     useEffect(() => {
         setImgState({ scale: 2.5, x: 0, y: 0, dragging: false, startX: 0, startY: 0 })
         if (expandedPoleId) {
             setStreetViewOpen(false)
-            setSvLoading(true)
+            // setSvLoading(true)
             const t1 = setTimeout(() => setStreetViewOpen(true), 600) // Slide out
-            const t2 = setTimeout(() => setSvLoading(false), 2000)   // Finish search
-            return () => { clearTimeout(t1); clearTimeout(t2) }
+            // const t2 = setTimeout(() => setSvLoading(false), 2000)   // Finish search
+            return () => { clearTimeout(t1); }
         } else {
             setStreetViewOpen(false)
-            setSvLoading(false)
+            // setSvLoading(false)
         }
     }, [expandedPoleId])
 
@@ -610,12 +612,44 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                                             </div>
                                         </div>
 
+                                        {expandedPole.height_m && (
+                                            <div>
+                                                <div className="text-xs font-mono text-gray-500 mb-1">3D HEIGHT ANALYSIS</div>
+                                                <div className="flex items-center gap-3">
+                                                    <div className="h-2 flex-1 bg-gray-800 rounded-full overflow-hidden">
+                                                        {/* Assume max height 15m for bar scale */}
+                                                        <div className="h-full bg-blue-500 shadow-[0_0_10px_#3b82f6]"
+                                                            style={{ width: `${Math.min((expandedPole.height_m / 15) * 100, 100)}%` }}></div>
+                                                    </div>
+                                                    <span className="text-2xl font-bold text-blue-400">{expandedPole.height_m.toFixed(1)}m</span>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <div>
                                             <div className="text-xs font-mono text-gray-500 mb-1">STATUS</div>
-                                            <span className="inline-block px-3 py-1 bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 rounded text-sm font-bold tracking-wider">
-                                                VERIFIED ACTIVE
+                                            <span className={`inline-block px-3 py-1 border rounded text-sm font-bold tracking-wider ${expandedPole.status === 'Critical' ? 'bg-red-500/10 border-red-500/40 text-red-500' :
+                                                expandedPole.status === 'Review' ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' :
+                                                    expandedPole.status === 'Flagged' ? 'bg-yellow-500/10 border-yellow-500/40 text-yellow-500' :
+                                                        'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                                                }`}>
+                                                {expandedPole.status?.toUpperCase() || 'VERIFIED ACTIVE'}
                                             </span>
                                         </div>
+
+                                        {expandedPole.issues && expandedPole.issues.length > 0 && (
+                                            <div className="animate-in slide-in-from-bottom-2 duration-500 delay-100">
+                                                <div className="text-xs font-mono text-gray-500 mb-2 mt-4">DETECTED ISSUES</div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {expandedPole.issues.map((issue, idx) => (
+                                                        <div key={idx} className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded">
+                                                            <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+                                                            <span className="text-xs font-bold text-red-400 font-mono uppercase">{issue}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>

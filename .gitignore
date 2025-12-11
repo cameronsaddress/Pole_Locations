@@ -38,7 +38,7 @@ ENV/
 .env
 
 # Data files (large datasets)
-data/raw/
+data/
 data/raw/*.csv
 data/raw/*.geojson
 data/raw/*.shp
@@ -70,6 +70,7 @@ outputs/reports/*.xlsx
 outputs/exports/*.csv
 outputs/exports/*.geojson
 outputs/logs/*.log
+outputs/tuning_trials/
 brew_install.log
 
 # Runtime artifacts

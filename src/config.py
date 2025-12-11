@@ -30,6 +30,7 @@ LOGS_DIR = OUTPUTS_DIR / "logs"
 CRS_STANDARD = "EPSG:4326"  # WGS84 lat/lon
 BUFFER_DISTANCE_METERS = 15  # Buffer zone around poles
 MATCH_THRESHOLD_METERS = 10  # Maximum distance for spatial matching
+MOVED_THRESHOLD_METERS = 2.0   # Displacement required to flag as "moved"
 
 # East Coast Bounding Box (NY to VA)
 EAST_COAST_BBOX = {
@@ -69,11 +70,17 @@ WEIGHT_DISTANCE = 0.3
 
 # Report Recency Weights
 RECENCY_WEIGHTS = {
-    "under_1yr": 1.0,
-    "1_to_3yr": 0.8,
-    "3_to_5yr": 0.5,
     "over_5yr": 0.2
 }
+
+# Fusion / Business Logic
+FUSION_UPDATE_CONFIDENCE_THRESHOLD = 0.5
+FUSION_NEW_FLAGGED_CONFIDENCE_THRESHOLD = 0.6
+FUSION_NEW_FLAGGED_MAX_ROAD_DIST_M = 60.0
+
+FINANCIAL_IMPACT_DAMAGE = 1500.0
+FINANCIAL_IMPACT_LEANING = 500.0
+FINANCIAL_IMPACT_VEGETATION = 200.0
 
 # Imagery Configuration
 NAIP_S3_BUCKET = "usgs-naip"

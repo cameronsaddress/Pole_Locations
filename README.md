@@ -4,6 +4,30 @@
 > **Last Updated:** December 2025
 > **Architecture:** Modular Containerized Pipeline (NVIDIA GB10 Optimized)
 
+## 🚨 CRITICAL RULE: USE DOCKER
+
+**ALL backend commands, scripts, and python execution MUST be run inside the Docker containers.**
+
+*   **GPU/Pipeline Work**: Execute inside `polelocations-gpu`
+    ```bash
+    docker exec -it polelocations-gpu /bin/bash
+    ```
+    ```
+*   **Database Ops**: Execute inside `polevision-db`
+*   **Web/API**: Execute inside `polevision-web` or `polevision-api`
+
+**NEVER run python scripts directly on the host machine.** The host environment does NOT have the correct dependencies (GDAL, PyTorch-CUDA, PostGIS drivers).
+
+## 🧠 AI Model Upgrade (YOLO11)
+
+The system is currently transitioning from **YOLOv8** to **YOLO11 Large**.
+*   **Default Behavior**: The system prioritizes the new YOLO11l checkpoint at `/workspace/models/checkpoints/yolo11l_pole_v1/weights/best.pt`.
+*   **Fallback**: If the YOLO11 training is incomplete, it falls back to the legacy `pole_detector_real.pt` (YOLOv8).
+*   **Training**: To regenerate the YOLO11 model, run:
+    ```bash
+    docker exec polelocations-gpu yolo detect train model=yolo11l.pt data=/workspace/data/processed/pole_training_dataset_512/dataset.yaml epochs=50 imgsz=512 batch=16 project=/workspace/models/checkpoints name=yolo11l_pole_v1 device=0
+    ```
+
 ## 📖 System Overview
 
 **PoleLocations Enterprise** is a high-throughput, AI-driven asset verification system designed to audit utility poles on a massive scale. It moves beyond legacy file-based processing to a robust **PostGIS-Centric Architecture**, where the database serves as the single source of truth for all pipeline state.

@@ -21,7 +21,12 @@ def run_detection_service(limit: int = 10):
     
     with Session(engine) as session:
         # Get pending tiles
-        tiles = session.exec(select(Tile).where(Tile.status == "Pending").limit(limit)).all()
+        # Get pending tiles or failed tiles eligible for retry
+        statement = select(Tile).where(
+            (Tile.status == "Pending") | 
+            ((Tile.status == "Failed") & (Tile.retry_count < 3))
+        ).limit(limit)
+        tiles = session.exec(statement).all()
         
         if not tiles:
             logger.info("No pending tiles found.")
@@ -76,6 +81,7 @@ def run_detection_service(limit: int = 10):
             except Exception as e:
                 logger.error(f"❌ Failed tile {tile.id}: {e}", exc_info=True)
                 tile.status = "Failed"
+                tile.retry_count += 1
                 session.add(tile)
                 session.commit()
 

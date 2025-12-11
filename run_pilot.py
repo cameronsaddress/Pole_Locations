@@ -33,6 +33,7 @@ from src.fusion.context_filters import annotate_context_features, filter_implaus
 from src.detection.pole_detector import PoleDetector
 from src.detection.calibration_audit import audit_calibration_metrics
 from src.ingestion.data_registry import probe_data_sources, write_status_report
+from src.utils.download_3dep_dsm import download_3dep_dsm_tiles
 from config import (
     RAW_DATA_DIR,
     PROCESSED_DATA_DIR,
@@ -361,8 +362,26 @@ def run_pilot_pipeline(force_recompute: bool = False):
             missing = info["missing_paths"]
             if missing:
                 logger.info("      Missing artifacts:")
-                for path in missing:
-                    logger.info("        - %s", path)
+    # Step 1c: Ensure 3D Elevation Data (DSM)
+    logger.info("\n[STEP 1c] Verifying 3D Elevation Data (DSM) availability...")
+    dsm_dir = PROCESSED_DATA_DIR / '3dep_dsm'
+    dsm_dir.mkdir(parents=True, exist_ok=True)
+    existing_dsm = list(dsm_dir.glob("*.tif"))
+    
+    if len(existing_dsm) < 4: # Minimal coverage check
+        logger.info(f"   Insufficient DSM tiles found ({len(existing_dsm)}). Auto-downloading coverage for pilot area...")
+        # Use primary pole file for bbox
+        primary_file = RAW_DATA_DIR / 'osm_poles_harrisburg_real.csv'
+        if primary_file.exists():
+            try:
+                downloaded = download_3dep_dsm_tiles(primary_file, dsm_dir, limit=20)
+                logger.info(f"   ✓ Downloaded {len(downloaded)} DSM tiles for 3D validation.")
+            except Exception as e:
+                logger.warning(f"   ⚠ Failed to download 3DEP DSM data: {e}. 3D filtering will be disabled.")
+        else:
+            logger.warning("   ⚠ No primary pole file to base DSM coverage on.")
+    else:
+        logger.info(f"   ✓ Found {len(existing_dsm)} existing DSM tiles.")
 
     # Step 2: AI detections on real imagery
     logger.info("\n[STEP 2] Running YOLO detections on real imagery crops...")
@@ -484,8 +503,17 @@ def run_pilot_pipeline(force_recompute: bool = False):
     else:
         # Preserve backwards compatibility with downstream consumers expecting both columns.
         detections_df['ai_confidence'] = detections_df.get('confidence', 0.0)
+
+    # Step 3: Contextual Fusion & Filtering
+    logger.info("\n[STEP 3] Contextual Fusion: Adding roads, water, 3D height data...")
     detections_df = annotate_context_features(detections_df)
+    
+    # SAVE ANNOTATED DETECTIONS for downstream validators
+    detections_df.to_csv(ai_detections_csv, index=False)
+    logger.info(f"   ✓ Persisted annotated detections with 3D data to {ai_detections_csv}")
+
     detections_df, dropped_df = filter_implausible_detections(detections_df)
+    
     if not dropped_df.empty:
         reject_path = PROCESSED_DATA_DIR / 'ai_detections_rejected.csv'
         dropped_df.to_csv(reject_path, index=False)

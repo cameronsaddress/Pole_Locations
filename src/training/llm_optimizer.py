@@ -17,7 +17,7 @@ class LLMHyperparameterOptimizer:
         if not self.api_key:
             logger.warning("No OpenRouter API key provided. LLM Optimization will fail.")
 
-    def suggest_hyperparameters(self, current_best: Dict, recent_trials: List[Dict]) -> Dict:
+    def suggest_hyperparameters(self, current_best: Dict, recent_trials: List[Dict], mode: str = "detector") -> Dict:
         """
         Consults the LLM to suggest the next set of hyperparameters based on previous performance.
         """

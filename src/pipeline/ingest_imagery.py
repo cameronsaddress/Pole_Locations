@@ -35,37 +35,51 @@ def ingest_imagery_tiles(directories: List[str]):
         new_count = 0
         total_count = 0
         
+        # 1. Collect all potential file paths first
+        all_files = []
         for dir_path in directories:
             p = Path(dir_path)
             if not p.exists():
                 logger.warning(f"Directory not found: {p}")
                 continue
+            all_files.extend(list(p.rglob("*.tif")))
+            
+        if not all_files:
+            logger.info("No files found.")
+            return
+
+        logger.info(f"Found {len(all_files)} potential files. Checking database for existing records...")
+
+        # 2. Bulk check existence
+        # We'll do this by getting all known paths. 
+        # For huge datasets, we might want to do this in chunks, but for <100k files this is fine.
+        existing_paths = set(session.exec(select(Tile.path)).all())
+        
+        # 3. Filter new files
+        new_files = [f for f in all_files if str(f) not in existing_paths]
+        
+        logger.info(f"Identified {len(new_files)} new files to ingest.")
+        
+        # 4. Bulk Insert
+        for i, tile_path in enumerate(new_files):
+            try:
+                bbox = get_tile_bbox(tile_path)
                 
-            for tile_path in p.rglob("*.tif"):
-                total_count += 1
-                try:
-                    # Check if exists
-                    exists = session.exec(select(Tile).where(Tile.path == str(tile_path))).first()
-                    if exists:
-                        continue
+                tile = Tile(
+                    path=str(tile_path),
+                    bbox=from_shape(bbox, srid=4326),
+                    status="Pending"
+                )
+                session.add(tile)
+                new_count += 1
+                
+                if new_count % 100 == 0:
+                    session.commit()
+                    logger.info(f"Ingested {new_count}/{len(new_files)} new tiles...")
                     
-                    bbox = get_tile_bbox(tile_path)
-                    
-                    tile = Tile(
-                        path=str(tile_path),
-                        bbox=from_shape(bbox, srid=4326),
-                        status="Pending"
-                    )
-                    session.add(tile)
-                    new_count += 1
-                    
-                    if new_count % 100 == 0:
-                        session.commit()
-                        logger.info(f"Indexed {new_count} new tiles...")
-                        
-                except Exception as e:
-                    logger.error(f"Failed to ingest {tile_path}: {e}")
-                    
+            except Exception as e:
+                logger.error(f"Failed to ingest {tile_path}: {e}")
+                
         session.commit()
         logger.info(f"✅ Ingestion complete. Scanned {total_count} files, Added {new_count} new tiles.")
 
