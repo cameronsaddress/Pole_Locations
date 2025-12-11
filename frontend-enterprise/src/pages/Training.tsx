@@ -13,7 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Zap, Activity, Brain, Terminal, Play, Cpu, Eye, Lock } from 'lucide-react'
+import { Zap, Activity, Brain, Terminal, Play, Cpu, Eye, Lock, Square } from 'lucide-react'
 
 
 // Types
@@ -507,14 +507,24 @@ export default function Training() {
                                 </div>
                             </div>
                             <div className="flex justify-end">
-                                <button
-                                    onClick={startDetectorDeployment}
-                                    disabled={isDetectorDeploying}
-                                    className={`px-8 py-4 font-bold rounded shadow-[0_0_20px_rgba(59,130,246,0.3)] transition-all flex items-center justify-center gap-2 ${isDetectorDeploying ? 'bg-blue-900 text-blue-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
-                                >
-                                    <Play className="w-5 h-5 fill-current" />
-                                    {isDetectorDeploying ? "RUNNING DETECTOR..." : "START DETECTION JOB"}
-                                </button>
+                                {telemetry?.status === "Training" ? (
+                                    <button
+                                        onClick={stopTrainingJob}
+                                        className="px-8 py-4 font-bold rounded shadow-[0_0_20px_rgba(239,68,68,0.3)] transition-all flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white animate-pulse"
+                                    >
+                                        <Square className="w-5 h-5 fill-current" />
+                                        STOP JOB
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={startDetectorDeployment}
+                                        disabled={isDetectorDeploying}
+                                        className={`px-8 py-4 font-bold rounded shadow-[0_0_20px_rgba(59,130,246,0.3)] transition-all flex items-center justify-center gap-2 ${isDetectorDeploying ? 'bg-blue-900 text-blue-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
+                                    >
+                                        <Play className="w-5 h-5 fill-current" />
+                                        {isDetectorDeploying ? "RUNNING DETECTOR..." : "START DETECTION JOB"}
+                                    </button>
+                                )}
                             </div>
                         </CardContent>
                     </Card>
