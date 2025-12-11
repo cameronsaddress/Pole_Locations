@@ -70,6 +70,23 @@ def train_yolo(lr0, momentum, weight_decay, epochs, batch_size):
 
     model.add_callback("on_train_epoch_end", on_train_epoch_end)
 
+    def on_train_batch_end(trainer):
+        # UI Visibility: Log progress every 10% of batches
+        try:
+            total = trainer.num_batches
+            current = trainer.batch + 1
+            if total > 0:
+                interval = max(5, int(total * 0.1)) # At least every 5 batches
+                if current % interval == 0 or current == 1:
+                   print(json.dumps({
+                       "type": "progress", 
+                       "payload": f"Epoch {trainer.epoch + 1}/{trainer.epochs}: Batch {current}/{total}..."
+                   }), flush=True)
+        except:
+            pass
+
+    model.add_callback("on_train_batch_end", on_train_batch_end)
+
     try:
         results = model.train(
             data=str(yaml_path),

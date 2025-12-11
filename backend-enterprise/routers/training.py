@@ -81,6 +81,12 @@ async def run_script(script_path: str, args: list):
                     "payload": f"[EXEC] Epoch {data.get('epoch')}/{data.get('total_epochs', '?')}: mAP50={data.get('map50', 0):.3f} Loss={data.get('box_loss', 0):.3f}"
                 })
                 is_handled = True
+            elif data.get("type") in ["log", "progress"]:
+                job_context["trials_queue"].append({
+                    "type": "log",
+                    "payload": data.get("payload", str(data))
+                })
+                is_handled = True
             
             # Keep track of last valid JSON for return value
             final_json = data
