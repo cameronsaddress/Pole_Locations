@@ -1,4 +1,26 @@
-# PoleLocations - AI-Driven Utility Pole Verification System (Enterprise Edition)
+NO SIMULATION OR MOCK CODE<<EVER!!!
+
+## Enterprise Architecture Configuration (Strict)
+
+This system adheres to a strict "Orchestrator-Worker" container pattern to leverage dedicated GPU resources:
+
+1.  **Frontend Container (`polevision-web`)**:
+    *   Hosts the React Enterprise Dashboard.
+    *   Communicates solely with the API Container via HTTP/WebSocket.
+
+2.  **API Container (`polevision-api`)**:
+    *   **Role**: Lightweight Orchestrator & API Gateway.
+    *   **Configuration**: Mounts host Docker socket (`/var/run/docker.sock`).
+    *   **Action**: Does NOT run training locally. Instead, dispatches execution commands via `docker exec` to the specialized GPU container.
+    *   **Context**: Mounts source code to `/app/src` for dependency resolution but delegates execution.
+
+3.  **GPU Container (`polelocations-gpu`)**:
+    *   **Role**: Heavy Compute / Training Engine.
+    *   **Base**: `nvcr.io/nvidia/pytorch:25.09-py3`.
+    *   **Execution**: Receives commands from API to run scripts like `src/training/train_detector.py` directly on the GPU (NVIDIA GB10).
+    *   **IO**: Streams live JSON metrics to stdout, which are piped back through the API to the Frontend.
+
+**Deployment Rule**: Ensure `polevision-api` is rebuilt with `docker-cli` installed and has access to the host Docker socket.
 
 > **Source Repository:** https://github.com/cameronsaddress/PoleLocations
 > **Status:** Enterprise Beta - NVIDIA GB10 Optimized

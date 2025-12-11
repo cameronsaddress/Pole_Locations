@@ -83,20 +83,30 @@ class LLMHyperparameterOptimizer:
             params = json.loads(content)
             
             # Validate ranges (sanity check)
-            params['lr0'] = max(0.0001, min(0.01, params.get('lr0', 0.01)))
-            params['epochs'] = int(params.get('epochs', 100))
+            if mode == "detector":
+                params['lr0'] = max(0.0001, min(0.01, params.get('lr0', 0.01)))
+                params['epochs'] = int(params.get('epochs', 100))
+            else:
+                params['confidence'] = max(0.1, min(0.9, params.get('confidence', 0.4)))
+                params['nms'] = max(0.1, min(0.9, params.get('nms', 0.45)))
             
             return params
             
         except Exception as e:
             logger.error(f"LLM Optimization Failed: {e}")
             # Fallback to safe defaults if LLM fails
-            return {
-                "lr0": 0.01,
-                "momentum": 0.937,
-                "weight_decay": 0.0005,
-                "epochs": 100
-            }
+            if mode == "detector":
+                return {
+                    "lr0": 0.01,
+                    "momentum": 0.937,
+                    "weight_decay": 0.0005,
+                    "epochs": 100
+                }
+            else:
+                return {
+                    "confidence": 0.4,
+                    "nms": 0.45
+                }
 
     def log_result(self, params: Dict, metrics: Dict):
         """Record the result of a training run for context in the next iteration."""

@@ -10,13 +10,13 @@ load_dotenv()
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path(os.getenv("DATA_DIR", PROJECT_ROOT / "data"))
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 IMAGERY_DIR = DATA_DIR / "imagery"
 TRAINING_DATA_DIR = DATA_DIR / "training"
 
-MODELS_DIR = PROJECT_ROOT / "models"
+MODELS_DIR = Path(os.getenv("MODELS_DIR", PROJECT_ROOT / "models"))
 CHECKPOINTS_DIR = MODELS_DIR / "checkpoints"
 EXPORTS_DIR = MODELS_DIR / "exports"
 THRESHOLD_EXPORT_PATH = EXPORTS_DIR / "detection_thresholds.json"
@@ -40,7 +40,7 @@ EAST_COAST_BBOX = {
 }
 
 # AI Model Configuration
-MODEL_TYPE = "yolov8l"  # YOLOv8 large (enterprise grade accuracy)
+MODEL_TYPE = "yolo11l"  # YOLO11 Large (Enterprise standard)
 MODEL_INPUT_SIZE = 640
 # Minimum confidence for detections
 CONFIDENCE_THRESHOLD = float(os.getenv("DETECTION_CONFIDENCE_THRESHOLD", "0.25"))

@@ -69,17 +69,21 @@ class PoleDetector:
         model_path: Optional[Path] = None,
         confidence: Optional[float] = None,
         iou: Optional[float] = None,
-        augment: bool = True
+        iou: Optional[float] = None,
+        augment: bool = True,
+        classification_confidence: float = 0.4
     ):
         """
         Initialize pole detector
-
+        
         Args:
-            model_path: Path to trained model weights (uses pretrained if None)
-            confidence: Minimum confidence threshold for detections
-            augment: Enable Test Time Augmentation (TTA) for higher accuracy
+            model_path: Path to trained model weights
+            confidence: YOLO object detection threshold
+            classification_confidence: CLIP Zero-Shot threshold
         """
         overrides = self._load_threshold_overrides()
+
+        self.classification_confidence = classification_confidence
 
         self.confidence = (
             confidence
@@ -126,9 +130,18 @@ class PoleDetector:
                 clf_device = 0 if torch.cuda.is_available() else -1
                 self.classifier = pipeline(
                     "zero-shot-image-classification", 
-                    model="openai/clip-vit-base-patch32",
+                    model="openai/clip-vit-large-patch14", # User requested "ViT-L"
                     device=clf_device
                 )
+                self.classification_labels = [
+                    "clean utility pole", 
+                    "rusted transformer", 
+                    "heavy vegetation encroachment", 
+                    "bird nest", 
+                    "leaning pole", 
+                    "broken crossarm", 
+                    "unauthorized attachment"
+                ]
                 logger.info("CLIP model loaded successfully.")
             except Exception as e:
                 logger.warning(f"Failed to load CLIP model: {e}")
@@ -279,13 +292,19 @@ class PoleDetector:
                             top_score = clip_result[0]['score']
                             
                             # Simple mapping to internal enum/short names
-                            if top_score > 0.4: # Threshold for specific defect
+                            if top_score > self.classification_confidence: # Threshold for specific defect
                                 if "leaning" in top_label:
                                     class_name = "pole_leaning"
                                 elif "vegetation" in top_label:
                                     class_name = "pole_vegetation"
                                 elif "broken" in top_label or "damaged" in top_label:
                                     class_name = "pole_damage"
+                                elif "rusted" in top_label:
+                                    class_name = "pole_rust"
+                                elif "attachment" in top_label:
+                                    class_name = "pole_attachment"
+                                elif "nest" in top_label:
+                                    class_name = "pole_nest"
                                 else:
                                     class_name = "pole_good"
                         except Exception as e:

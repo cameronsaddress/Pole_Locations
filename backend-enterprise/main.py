@@ -45,7 +45,7 @@ async def training_endpoint(websocket: WebSocket):
     await websocket.accept()
     await websocket.send_json({
         "type": "log", 
-        "message": "Connected to NVIDIA GB10 Telemetry & Job Bus"
+        "payload": "Connected to NVIDIA GB10 Telemetry & Job Bus"
     })
     
     import subprocess
@@ -69,8 +69,6 @@ async def training_endpoint(websocket: WebSocket):
         except Exception:
             pass
         return {"gpu": 0, "vram": 0, "power": 0}
-
-    epoch = 1
     
     try:
         while True:
@@ -82,36 +80,24 @@ async def training_endpoint(websocket: WebSocket):
                 "payload": {
                     "gpu": data['gpu'],
                     "vram": round(data['vram'], 1),
-                    "power": data['power']
+                    "power": data['power'],
+                    "status": "Training" if training.job_context["is_running"] else "Idle"
                 }
             }
             await websocket.send_json(telemetry)
             
-            # 2. Check for Dynamic Trials (from Grok Optimizer)
-            if routers.training.job_context["trials_queue"]:
-                trial_event = routers.training.job_context["trials_queue"].pop(0)
-                await websocket.send_json(trial_event)
+            # 2. Check for Events (Logs, Stats, Trials) from Workers
+            # We pop all available events to ensure low latency
+            while training.job_context["trials_queue"]:
+                event = training.job_context["trials_queue"].pop(0)
+                await websocket.send_json(event)
             
-            # 3. Emit Training Stats (Graphs) if Job is Running
-            # We base this on the API state to be responsive immediately on button click
-            if routers.training.job_context["is_running"]:
-                import random
-                if random.random() < 0.2: 
-                    # Different stats for detection vs clip? For now, we reuse the graph schema
-                    # In a full app, we'd send type='clip_stats'.
-                    stats = {
-                        "type": "stats",
-                        "payload": {
-                            "epoch": epoch,
-                            "total_epochs": 300,
-                            "box_loss": max(0.5, 2.5 - (epoch * 0.01) + random.uniform(-0.1, 0.1)),
-                            "map50": min(0.95, 0.5 + (epoch * 0.002) + random.uniform(-0.01, 0.01))
-                        }
-                    }
-                    await websocket.send_json(stats)
-                    epoch += 1
+            await asyncio.sleep(0.5) # Poll frequency
             
-            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        logger.info("Training Dashboard disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket Error: {e}")
             
     except WebSocketDisconnect:
         logger.info("Training Dashboard disconnected")

@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     gdal-bin \
     libgdal-dev \
+    docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 # Set GDAL environment variables
