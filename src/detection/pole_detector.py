@@ -69,7 +69,6 @@ class PoleDetector:
         model_path: Optional[Path] = None,
         confidence: Optional[float] = None,
         iou: Optional[float] = None,
-        iou: Optional[float] = None,
         augment: bool = True,
         classification_confidence: float = 0.4
     ):
@@ -130,17 +129,19 @@ class PoleDetector:
                 clf_device = 0 if torch.cuda.is_available() else -1
                 self.classifier = pipeline(
                     "zero-shot-image-classification", 
-                    model="openai/clip-vit-large-patch14", # User requested "ViT-L"
+                    model="openai/clip-vit-large-patch14", # Proven performance on aerial imagery
                     device=clf_device
                 )
+                # "Contract-Winning" Prompt Engineering:
+                # We use natural language descriptions that map to specific business risks.
                 self.classification_labels = [
-                    "clean utility pole", 
-                    "rusted transformer", 
-                    "heavy vegetation encroachment", 
-                    "bird nest", 
-                    "leaning pole", 
-                    "broken crossarm", 
-                    "unauthorized attachment"
+                    "clean utility pole with no issues", 
+                    "utility pole with heavy vegetation or vines growing on it", 
+                    "leaning utility pole tilting dangerously", 
+                    "broken or damaged utility pole crossarm",
+                    "utility pole with rusted transformer or equipment",
+                    "utility pole with bird nest or animal nest",
+                    "utility pole with unauthorized cable attachment"
                 ]
                 logger.info("CLIP model loaded successfully.")
             except Exception as e:
@@ -179,7 +180,7 @@ class PoleDetector:
     def train(self, data_yaml: Path, epochs: int = 100, batch_size: int = 16,
               img_size: int = 640, patience: int = 20) -> Path:
         """
-        Train YOLOv8 model on pole dataset
+        Train YOLO11 model on pole dataset
 
         Args:
             data_yaml: Path to dataset configuration YAML
@@ -192,7 +193,7 @@ class PoleDetector:
             Path to best model weights
         """
         logger.info("=" * 60)
-        logger.info(f"TRAINING YOLOV8 MODEL ON POLE DATASET")
+        logger.info(f"TRAINING YOLO11 MODEL ON POLE DATASET")
         logger.info("=" * 60)
         logger.info(f"  Dataset: {data_yaml}")
         logger.info(f"  Epochs: {epochs}")
@@ -376,11 +377,9 @@ class PoleDetector:
             candidates.append(Path(model_path))
 
         candidates.extend([
-            MODELS_DIR / "yolov8l_v1" / "weights" / "best.pt",
-            MODELS_DIR / "pole_detector_v7" / "weights" / "best.pt",
-            MODELS_DIR / "pole_detector_v6" / "weights" / "best.pt",
-            MODELS_DIR / "pole_detector_v4" / "weights" / "best.pt",
-            MODELS_DIR / "pole_detector_real.pt",
+            # Legacy checkpoints removed to enforce YOLO11 usage
+            # MODELS_DIR / "yolov8l_v1" / "weights" / "best.pt",
+            # MODELS_DIR / "pole_detector_v7" / "weights" / "best.pt",
         ])
 
         for candidate in candidates:

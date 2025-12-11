@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from routers import ops, training
+from routers import ops, training, work_orders
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # --- ROUTERS ---
 app.include_router(ops.router)
 app.include_router(training.router, prefix="/api/v2/training")
+app.include_router(work_orders.router)
 
 # --- WEBSOCKETS ---
 @app.websocket("/ws/training")
