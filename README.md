@@ -100,6 +100,21 @@ To run the pipeline in a loop (monitoring for new imagery):
 docker exec ... polelocations-gpu python src/pipeline/runner.py --loop
 ```
 
+### 4. One-Click Enterprise Run (Train + Detect + Fuse)
+For a complete system test (Training YOLO11l -> Running Inference on 3 PA Counties -> Fusion), use the **Master Orchestrator**:
+
+```bash
+docker exec -e PYTHONPATH=/workspace:/workspace/backend-enterprise \
+            -e DATABASE_URL=postgresql://pole_user:pole_secure_password@localhost:5433/polevision \
+            polelocations-gpu python /workspace/run_full_enterprise_pipeline.py
+```
+
+**What this does:**
+1.  **Traings YOLO11l**: Runs 50 epochs on the `pole_training_dataset_512`.
+2.  **Inference**: Runs detection on **Dauphin**, **York**, and **Cumberland** counties.
+3.  **Enrichment**: Applies PASDA Roads & USGS Lidar filters.
+4.  **Fusion**: Validates against FAA Obstacles & OpenInfraMap.
+
 ---
 
 ## 🧠 Pipeline Stages (Deep Dive)
