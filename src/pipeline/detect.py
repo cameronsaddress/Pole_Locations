@@ -1,11 +1,13 @@
 
 import logging
 from pathlib import Path
-from sqlmodel import Session, select
+import pandas as pd
+from sqlmodel import Session, select, text
 from database import engine
 from models import Tile, Detection
-# Import from src if running from root
 from src.detection.pole_detector import PoleDetector
+from src.pipeline.fusion_engine import FusionEngine 
+from src.fusion.context_filters import annotate_context_features
 from geoalchemy2.shape import from_shape
 from shapely.geometry import Point
 from datetime import datetime
@@ -14,14 +16,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def run_detection_service(limit: int = 10):
-    logger.info("Starting detection service...")
+    logger.info("Starting Enterprise Detection Service (Unified Detect/Enrich/Fuse)...")
     
-    # Initialize detector (loads YOLO + CLIP)
+    # Initialize components
     detector = PoleDetector() 
-    
+    fusion = FusionEngine()
+
     with Session(engine) as session:
         # Get pending tiles
-        # Get pending tiles or failed tiles eligible for retry
         statement = select(Tile).where(
             (Tile.status == "Pending") | 
             ((Tile.status == "Failed") & (Tile.retry_count < 3))
@@ -35,13 +37,12 @@ def run_detection_service(limit: int = 10):
         for tile in tiles:
             logger.info(f"Processing tile {tile.id}: {tile.path}")
             try:
-                # Update status to Running
+                # 1. Update Status
                 tile.status = "Running"
                 session.add(tile)
                 session.commit()
                 
-                # Run Inference
-                # detect_tiles expects a list of Path objects
+                # 2. Check File
                 tile_path = Path(tile.path)
                 if not tile_path.exists():
                      logger.error(f"File not found: {tile_path}")
@@ -50,36 +51,69 @@ def run_detection_service(limit: int = 10):
                      session.commit()
                      continue
 
-                # Run actual detection
+                # 3. Run Inference
                 results = detector.detect_tiles([tile_path])
+                logger.info(f"Tile {tile.id}: Found {len(results)} raw detections.")
                 
-                logger.info(f"Found {len(results)} detections.")
+                if not results:
+                    tile.status = "Processed"
+                    tile.last_processed_at = datetime.utcnow()
+                    session.add(tile)
+                    session.commit()
+                    continue
+
+                # 4. Contextual Enrichment (Full Suite)
+                # Convert to DataFrame
+                df = pd.DataFrame(results)
+                # Ensure lat/lon are float
+                df["lat"] = df["lat"].astype(float)
+                df["lon"] = df["lon"].astype(float)
                 
-                for r in results:
-                    # Convert to DB Model
-                    # Ensure lat/lon are floats
-                    lat = float(r['lat'])
-                    lon = float(r['lon'])
-                    point = Point(lon, lat)
+                # Enrich with Roads, DSM, Water
+                # This function handles file loading internally
+                logger.info("  -> running full context enrichment...")
+                df = annotate_context_features(df)
+                
+                # 5. Insert to DB
+                for _, row in df.iterrows():
+                    point = Point(row['lon'], row['lat'])
+                    
+                    # Safe retrieval for optional columns
+                    rd_dist = row.get('road_distance_m')
+                    rd_dist = float(rd_dist) if pd.notna(rd_dist) else None
+                    
+                    hag = row.get('height_ag_m')
+                    hag = float(hag) if pd.notna(hag) else None
                     
                     det = Detection(
-                        confidence=float(r['ai_confidence']),
-                        class_name=r.get('class_name', "Unknown"),
+                        confidence=float(row['ai_confidence']),
+                        class_name=row.get('class_name', "Unknown"),
                         image_path=str(tile.path), 
                         run_id=f"tile_{tile.id}",
-                        location=from_shape(point, srid=4326),
+                        location=from_shape(point, srid=4326), 
+                        road_distance_m=rd_dist,
+                        height_ag_m=hag,
                         created_at=datetime.utcnow()
                     )
                     session.add(det)
+
+                # 6. Commit Detections
+                session.commit() 
+
+                # 7. Run Fusion Immediately
+                fusion.run_fusion(session)
                 
+                # 8. Finalize Tile
                 tile.status = "Processed"
                 tile.last_processed_at = datetime.utcnow()
                 session.add(tile)
                 session.commit()
-                logger.info(f"✅ Tile {tile.id} processed successfully.")
+                
+                logger.info(f"✅ Tile {tile.id} complete.")
                 
             except Exception as e:
                 logger.error(f"❌ Failed tile {tile.id}: {e}", exc_info=True)
+                session.rollback() # Rollback
                 tile.status = "Failed"
                 tile.retry_count += 1
                 session.add(tile)

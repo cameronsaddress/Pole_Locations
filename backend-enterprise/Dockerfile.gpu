@@ -1,0 +1,26 @@
+FROM nvcr.io/nvidia/pytorch:25.09-py3
+
+# Set working directory (matches volume mount)
+WORKDIR /workspace
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    gdal-bin \
+    libgdal-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements from ONE level up (requires build context to be project root)
+# OR we assume this file is built with context '.'
+COPY requirements.txt /tmp/requirements.txt
+COPY backend-enterprise/requirements.txt /tmp/backend_requirements.txt
+
+# Install Python dependencies (including the numpy<2 fix)
+RUN pip install --upgrade pip && \
+    pip install "numpy<2.0.0" && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    pip install --no-cache-dir -r /tmp/backend_requirements.txt
+
+# Default command
+CMD ["sleep", "infinity"]

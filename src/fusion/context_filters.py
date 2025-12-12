@@ -1,6 +1,9 @@
 """Enrich detection DataFrames with contextual features and filter implausible hits."""
 from pathlib import Path
 from typing import List, Optional, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 import geopandas as gpd
 import pandas as pd
@@ -144,7 +147,14 @@ def annotate_with_dsm(
     if dsm_dir is None:
         dsm_dir = PROCESSED_DATA_DIR / "3dep_dsm"
 
-    if detections_df.empty or not dsm_dir.exists() or not list(dsm_dir.glob("*.tif")):
+    if detections_df.empty or not dsm_dir.exists():
+        detections_df = detections_df.copy()
+        detections_df["surface_elev_m"] = pd.NA
+        return detections_df
+        
+    tif_files = list(dsm_dir.glob("*.tif"))
+    if not tif_files:
+        logger.warning(f"No DSM tiles found in {dsm_dir}")
         detections_df = detections_df.copy()
         detections_df["surface_elev_m"] = pd.NA
         return detections_df
@@ -161,19 +171,26 @@ def annotate_with_dsm(
             # Just read bounds.
             with rasterio.open(tif) as src:
                 b = src.bounds
-                # Create box for index
-                geom = box(b.left, b.bottom, b.right, b.top)
+                # Create box for index (Project to 4326 if needed)
+                if src.crs and src.crs.to_string() != "EPSG:4326":
+                     from rasterio.warp import transform_bounds
+                     # transform_bounds(src_crs, dst_crs, left, bottom, right, top)
+                     left, bottom, right, top = transform_bounds(src.crs, "EPSG:4326", b.left, b.bottom, b.right, b.top)
+                     geom = box(left, bottom, right, top)
+                else:
+                     geom = box(b.left, b.bottom, b.right, b.top)
                 
                 tiles.append({
                     "path": tif,
-                    "src": None, # Lazy load
+                    "src": None, 
                     "bounds": geom,
                     "crs": src.crs
                 })
                 tile_geoms.append(geom)
+
         except RasterioIOError:
             continue
-            
+
     if not tiles:
         detections_df = detections_df.copy()
         detections_df["surface_elev_m"] = pd.NA
@@ -187,7 +204,7 @@ def annotate_with_dsm(
         
         # Query Index
         # query returns indices of geometries that intersect 'pt'
-        indices = tree.query(pt, predicate="contains")
+        indices = tree.query(pt, predicate="intersects")
         
         for idx in indices:
             tile = tiles[idx]

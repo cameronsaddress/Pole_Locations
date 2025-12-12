@@ -50,29 +50,57 @@ def run_command(cmd, cwd=None, env=None):
 def main():
     logger.info("Starting Full Enterprise Pipeline Run (Train -> Detect -> Fuse)")
     
+    # Check flags
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--skip-train", action="store_true", help="Skip YOLO training and use existing weights")
+    parser.add_argument("--skip-integrity", action="store_true", help="Skip Data Integrity/Repair check (e.g. if running separately)")
+    # Parse only known args to avoid conflicts if needed, or just parse_args
+    args, unknown = parser.parse_known_args()
+    
+    # --- PRE-FLIGHT CHECK: DATA INTEGRITY ---
+    if not args.skip_integrity:
+        logger.info("--- [PRE-FLIGHT] Checking Data Integrity ---")
+        
+        target_dirs = [
+            "/workspace/data/imagery/naip_multi_county/osm_poles_dauphin_pa",
+            "/workspace/data/imagery/naip_multi_county/osm_poles_york_pa",
+            "/workspace/data/imagery/naip_multi_county/osm_poles_cumberland_pa"
+        ]
+        
+        # Import here to avoid overhead if not needed globally, or move to top
+        from src.utils.integrity import scan_and_repair
+        scan_and_repair(target_dirs)
+    else:
+        logger.info("⏭️  Skipping Data Integrity Check (User Request).")
+
     # --- STEP 1: TRAIN YOLO11 ---
-    logger.info("--- [STEP 1/4] Training YOLO11l Model ---")
-    train_cmd = (
-        "yolo detect train "
-        "model=yolo11l.pt "
-        "data=/workspace/data/processed/pole_training_dataset_512/dataset.yaml "
-        "epochs=50 "
-        "imgsz=512 "
-        "batch=16 "
-        "project=/workspace/models/checkpoints "
-        "name=yolo11l_full_run "
-        "device=0 "
-        "exist_ok=True"
-    )
-    run_command(train_cmd)
+    if not args.skip_train:
+        logger.info("--- [STEP 1/4] Training YOLO11l Model ---")
+        train_cmd = (
+            "yolo detect train "
+            "model=yolo11l.pt "
+            "data=/workspace/data/processed/pole_training_dataset_512/dataset.yaml "
+            "epochs=50 "
+            "imgsz=512 "
+            "batch=16 "
+            "workers=8 "
+            "project=/workspace/models/checkpoints "
+            "name=yolo11l_full_run "
+            "device=0 "
+            "exist_ok=True"
+        )
+        run_command(train_cmd)
+    else:
+        logger.info("⏭️  Skipping Training (User Request). Using existing checkpoints.")
     
     # --- STEP 2: INFERENCE & FULL PIPELINE ---
     logger.info("--- [STEP 2/4] Running Enterprise Pipeline on PA Counties ---")
     
     target_dirs = [
-        "/data/imagery/naip_multi_county/dauphin_pa",
-        "/data/imagery/naip_multi_county/york_pa",
-        "/data/imagery/naip_multi_county/cumberland_pa"
+        "/workspace/data/imagery/naip_multi_county/osm_poles_dauphin_pa",
+        "/workspace/data/imagery/naip_multi_county/osm_poles_york_pa",
+        "/workspace/data/imagery/naip_multi_county/osm_poles_cumberland_pa"
     ]
     
     # Verify dirs exist inside container view

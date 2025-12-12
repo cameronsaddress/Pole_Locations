@@ -9,17 +9,46 @@ services:
       POSTGRES_PASSWORD: pole_secure_password
       POSTGRES_DB: polevision
     ports:
-      - "5433:5432"  # Exposed on 5433 to avoid conflict with existing postgres
+      - "5433:5432" # Exposed on 5433 to avoid conflict with existing postgres
     volumes:
       - pole_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pole_user -d polevision"]
+      test: [ "CMD-SHELL", "pg_isready -U pole_user -d polevision" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  polevision-gpu:
+    build:
+      context: .
+      dockerfile: backend-enterprise/Dockerfile.gpu
+    container_name: polevision-gpu
+    network_mode: "host"
+    ipc: "host"
+    volumes:
+      - ./:/workspace
+      - ./data:/data
+    working_dir: /workspace
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    command: sleep infinity
+    environment:
+      - PYTHONPATH=/workspace:/workspace/backend-enterprise
+      - DATABASE_URL=postgresql://pole_user:pole_secure_password@localhost:5433/polevision
+    depends_on:
+      polevision-db:
+        condition: service_healthy
+
   polevision-api:
-    build: 
+    build:
       context: ./backend-enterprise
       dockerfile: Dockerfile
     container_name: polevision-api
@@ -28,7 +57,7 @@ services:
     volumes:
       - ./backend-enterprise:/app
       - ./src:/app/src
-      - ./data:/data  # Read-Write for training outputs
+      - ./data:/data # Read-Write for training outputs
       - ./models:/models # Read-Write for checkpoints
       - /var/run/docker.sock:/var/run/docker.sock
     environment:

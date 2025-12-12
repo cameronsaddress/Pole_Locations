@@ -8,10 +8,13 @@ pyproj>=3.6.1
 
 # Data Processing
 pandas>=2.1.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0.0
 scipy>=1.11.0
+sqlmodel>=0.0.16
+geoalchemy2>=0.14.3
 
 # AI/ML Libraries
+transformers>=4.37.2
 torch>=2.1.0
 torchvision>=0.16.0
 ultralytics>=8.0.0

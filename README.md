@@ -1,32 +1,29 @@
 # PoleLocations Enterprise (PostGIS V3)
 
-> **Status:** Enterprise Beta (PostGIS Native)
+> **Status:** Enterprise Beta (Unified Pipeline)
 > **Last Updated:** December 2025
 > **Architecture:** Modular Containerized Pipeline (NVIDIA GB10 Optimized)
 
-## 🚨 CRITICAL RULE: USE DOCKER
+## 🚨 CRITICAL RULES: ENTERPRISE PROTOCOLS
 
-**ALL backend commands, scripts, and python execution MUST be run inside the Docker containers.**
+1.  **ALWAYS USE DOCKER CONTAINERS**: 
+    *   **GPU/Pipeline Work**: Execute inside `polevision-gpu`.
+      ```bash
+      docker exec -it polevision-gpu /bin/bash
+      ```
+    *   **Database Ops**: Execute inside `polevision-db`.
+    *   **Web/API**: Execute inside `polevision-web` or `polevision-api`.
 
-*   **GPU/Pipeline Work**: Execute inside `polelocations-gpu`
-    ```bash
-    docker exec -it polelocations-gpu /bin/bash
-    ```
-    ```
-*   **Database Ops**: Execute inside `polevision-db`
-*   **Web/API**: Execute inside `polevision-web` or `polevision-api`
+2.  **NEVER RUN ON HOST**: 
+    *   Do NOT run python scripts (`main.py`, `detect.py`) directly on the host machine. The host lacks critical dependencies (GDAL, PostGIS drivers, PyTorch-CUDA) which are isolated within the containers.
 
-**NEVER run python scripts directly on the host machine.** The host environment does NOT have the correct dependencies (GDAL, PyTorch-CUDA, PostGIS drivers).
+3.  **NO MOCK DATA**: 
+    *   This system is connected to live production databases (`polevision`, `poles` table) and processes real satellite imagery (`NAIP`). Do not introduce mock data unless explicitly running a unit test suite.
 
-## 🧠 AI Model Upgrade (YOLO11)
+4.  **STRICT PATHs**:
+    *   Always use absolute paths found within the container mapping (e.g., `/workspace/data/...`). Do not use relative paths like `../data`.
 
-The system is currently transitioning from **YOLOv8** to **YOLO11 Large**.
-*   **Default Behavior**: The system prioritizes the new YOLO11l checkpoint at `/workspace/models/checkpoints/yolo11l_pole_v1/weights/best.pt`.
-*   **Fallback**: If the YOLO11 training is incomplete, it falls back to the legacy `pole_detector_real.pt` (YOLOv8).
-*   **Training**: To regenerate the YOLO11 model, run:
-    ```bash
-    docker exec polelocations-gpu yolo detect train model=yolo11l.pt data=/workspace/data/processed/pole_training_dataset_512/dataset.yaml epochs=50 imgsz=512 batch=16 project=/workspace/models/checkpoints name=yolo11l_pole_v1 device=0
-    ```
+---
 
 ## 📖 System Overview
 
@@ -34,9 +31,11 @@ The system is currently transitioning from **YOLOv8** to **YOLO11 Large**.
 
 ### Core Objectives
 1.  **Ingest** aerial imagery (NAIP/GeoTIFF) and historical asset records (OSM/Utility Maps).
-2.  **Detect** poles using YOLO11 and **Classify** defects (leaning, rust, vegetation) using OpenAI CLIP (Zero-Shot).
-3.  **Enrich** detections with usage context (Height from DSM, Distance to Roads).
-4.  **Fuse** data to create a "Golden Record" in PostGIS, flagging discrepancies for human review.
+2.  **Unified Detection Service**: A single atomic operation that:
+    *   **Detects** poles using YOLO11l.
+    *   **Classifies** defects (leaning, rust, vegetation) using OpenAI CLIP.
+    *   **Enriches** detections with context (Height from DSM, Distance to Roads).
+    *   **Fuses** data to create a "Golden Record" in PostGIS immediately.
 
 ---
 
@@ -52,22 +51,19 @@ The system employs a strict "Orchestrator-Worker" pattern across four specialize
     *   `poles`: Master asset inventory (Point Geometry).
     *   `detections`: Raw AI outputs (transient).
     *   `tiles`: Imagery index and processing status.
-    *   `jobs`: Pipeline orchestration tracking.
 
-### 2. GPU Worker (`polelocations-gpu`)
+### 2. GPU Worker (`polevision-gpu`)
 *   **Image**: `nvcr.io/nvidia/pytorch:25.09-py3`
-*   **Role**: Heavy Compute / Inference Engine.
+*   **Role**: Unified Compute Engine.
 *   **Network**: **Host Mode** (Direct access to `localhost:5433`).
-*   **Mounts**: 
-    *   Source Code: `/home/canderson/PoleLocations` -> `/workspace`
-    *   Data: `/workspace/data` symlinked to `/data`
-*   **Workload**: Runs `runner.py` to execute Detection (YOLO), Enrichment, and Fusion.
+*   **Mounts**: `/workspace` (Code), `/data` (Imagery).
+*   **Workload**: Runs the **Unified Detection Service** (`detect.py`) which handles Inference -> Enrichment -> Fusion.
 
 ### 3. API Gateway (`polevision-api`)
 *   **Image**: Python 3.11 (FastAPI)
 *   **Role**: Lightweight REST API for the Frontend Dashboard.
 *   **Port**: `8000`.
-*   **Responsibility**: Queries `polevision-db` to serve GeoJSON assets and metrics. Does NOT run heavy inference.
+*   **Responsibility**: Queries `polevision-db` to serve GeoJSON assets and metrics. 
 
 ### 4. Frontend (`polevision-web`)
 *   **Image**: Node 20 (React/Vite)
@@ -80,117 +76,75 @@ The system employs a strict "Orchestrator-Worker" pattern across four specialize
 
 ### 1. Start the Infrastructure
 ```bash
-# Start DB, API, and Web
-docker-compose -f docker-compose.enterprise.yml up -d
+# Start DB, API, Web, and GPU Worker
+docker compose -f docker-compose.enterprise.yml up -d
 ```
 
-### 2. Run the Pipeline (The "Runner")
-The `runner.py` script is the master orchestrator. It functions as a CLI to run one or all stages of the pipeline. **It must be executed inside the GPU container** to access PyTorch/CUDA resources.
-
-```bash
-# Execute the full end-to-end pipeline (Ingest -> Detect -> Enrich -> Fusion)
-docker exec -e PYTHONPATH=/workspace:/workspace/backend-enterprise \
-            -e DATABASE_URL=postgresql://pole_user:pole_secure_password@localhost:5433/polevision \
-            polelocations-gpu python src/pipeline/runner.py
-```
-
-### 3. Continuous Mode (Daemon)
-To run the pipeline in a loop (monitoring for new imagery):
-```bash
-docker exec ... polelocations-gpu python src/pipeline/runner.py --loop
-```
-
-### 4. One-Click Enterprise Run (Train + Detect + Fuse)
-For a complete system test (Training YOLO11l -> Running Inference on 3 PA Counties -> Fusion), use the **Master Orchestrator**:
+### 2. Run the Unified Pipeline (The "Master Orchestrator")
+The `run_full_enterprise_pipeline.py` script is the certified entry point. It handles Training (optional), Ingestion, and the full Unified Detection Service.
 
 ```bash
 docker exec -e PYTHONPATH=/workspace:/workspace/backend-enterprise \
             -e DATABASE_URL=postgresql://pole_user:pole_secure_password@localhost:5433/polevision \
-            polelocations-gpu python /workspace/run_full_enterprise_pipeline.py
+            polevision-gpu python /workspace/run_full_enterprise_pipeline.py
 ```
 
 **What this does:**
-1.  **Traings YOLO11l**: Runs 50 epochs on the `pole_training_dataset_512`.
-2.  **Inference**: Runs detection on **Dauphin**, **York**, and **Cumberland** counties.
-3.  **Enrichment**: Applies PASDA Roads & USGS Lidar filters.
-4.  **Fusion**: Validates against FAA Obstacles & OpenInfraMap.
+1.  **Train (Optional)**: Trains YOLO11l on the latest dataset.
+2.  **Ingest**: Scans `/data/imagery` for new tiles.
+3.  **Detect & Enrich & Fuse**: 
+    *   Runs YOLO inference.
+    *   Enriches results with Road/DSM data *in-memory*.
+    *   Commits valid poles to the DB immediately.
+
+### 3. Continuous Mode (Daemon)
+To run the detection service in a loop (monitoring for new imagery):
+```bash
+docker exec ... polevision-gpu python src/pipeline/runner.py --loop
+```
+
+### 4. GPU Model Upgrade (YOLO11)
+The system uses **YOLO11 Large**.
+*   **Default Behavior**: Loads best weights from `/workspace/models/checkpoints/yolo11l_pole_v1/weights/best.pt`.
+*   **Retraining**: Handled automatically by the Master Orchestrator (step 2) unless `--skip-train` is passed.
 
 ---
 
-## 🧠 Pipeline Stages (Deep Dive)
+## 🧠 Unified Pipeline Logic (Deep Dive)
 
-The logic is split into modular services under `src/pipeline/`:
+The legacy disjointed scripts have been unified into a single service: `src/pipeline/detect.py`.
 
-### Stage A: Ingestion (`ingest_imagery.py`)
-- Scans `/data/imagery/naip_tiles` for GeoTIFFs.
-- Extracts Bounding Boxes (EPSG:4326).
-- **Output**: Inserts rows into the `tiles` table (Status: `Pending`).
+### Step A: Inference
+*   **Model**: YOLO11l + CLIP ViT-L/14.
+*   **Input**: 1km² NAIP Tile.
+*   **Output**: Stream of raw detections.
 
-### Stage B: Detection (`detect.py`)
-- Queries `tiles` where status=`Pending`.
-- **Model**: YOLO11l (Object Detection) + CLIP ViT-L/14 (Classification).
-- **Logic**: Sliding window inference (512px stride).
-- **Output**: Writes millions of rows to `detections` table.
-- **Hardware**: Auto-detects CUDA. Falls back to CPU if NVIDIA drivers are unavailable/mismatched.
+### Step B: Contextual Enrichment (In-Memory)
+*   **Roads**: Uses `PASDA` or OSM spatial index to calculate `road_distance_m`.
+*   **Height**: Samples 3DEP LiDAR DSM for `height_ag_m` (Height Above Ground).
+*   **Filtration**: Drops detection points located in water bodies or deep forests (low confidence).
 
-### Stage C: Enrichment (`enrich.py`)
-- **Input**: Raw `detections` lacking context.
-- **Logic**:
-    - **DSM**: Samples Height Above Ground from Digital Surface Models.
-    - **Roads**: Calculates `ST_Distance` to nearest road centerline (using PostGIS Topology).
-- **Output**: Updates `height_ag_m` and `road_distance_m` columns.
-
-### Stage D: Fusion (`fusion.py`)
-- **Input**: Enriched detections.
-- **Logic**:
-    - **Match**: `ST_DWithin(detection, pole, 10m)`
-    - **Update**: If match found, marks pole `Verified`.
-    - **Create**: If **High Confidence** + **Near Road** + **No Match** -> Creates NEW `Flagged` pole.
-- **Output**: Writes final assets to `poles` table.
+### Step C: Real-Time Fusion (`FusionEngine`)
+*   **The Engine**: `src/pipeline/fusion_engine.py`
+*   **Logic**:
+    *   **Match**: `ST_DWithin(detection, pole, 10m)`
+    *   **Update**: If match found, marks pole `Verified`.
+    *   **Create**: If it's a **High Confidence** + **Valid Context** prediction -> Creates NEW `Flagged` pole.
+*   **Outcome**: The `poles` table is updated **instantly** after each tile is processed.
 
 ---
 
-## 🛠 Developer Setup & Troubleshooting
+## 🌟 Data Sources
 
-### Database Connections
-*   **From Host**: `postgresql://pole_user:pole_secure_password@localhost:5433/polevision`
-*   **From API Container**: `postresql://pole_user:pole_secure_password@polevision-db:5432/polevision`
-*   **From GPU Container (Host Network)**: `postgresql://pole_user:pole_secure_password@localhost:5433/polevision`
+To ensure maximum accuracy, the system integrates a multi-layered data verification strategy:
 
-### Common Issues
-
-**1. "NVML: Unknown Error" / GPU not used**
-*   **Cause**: Host NVIDIA driver version mismatch with container runtime.
-*   **Fix**: Restart the GPU container or reboot the host instance. The pipeline will automatically fallback to CPU (slower but functional).
-
-**2. "ModuleNotFoundError: No module named 'database'"**
-*   **Cause**: `PYTHONPATH` not set correcty.
-*   **Fix**: Ensure `PYTHONPATH=/workspace:/workspace/backend-enterprise` is passed in the `docker exec` command.
-
-**3. Database Schema Missing**
-*   **Fix**: Re-run the init script:
-    ```bash
-    docker exec -e DATABASE_URL=... polelocations-gpu python /workspace/backend-enterprise/init_db.py
-    ```
-
----
-
-## 🌍 Enterprise Data Sources (Augmented)
-
-To ensure maximum accuracy (robustness), the system integrates a multi-layered data verification strategy using **Open Source & Federal Data**:
-
-| Source | Type | Role | Implementation |
-| :--- | :--- | :--- | :--- |
-| **NAIP** | Imagery (Raster) | **Detection**. High-res (1m) aerial photography. | `ingest_imagery.py` (Local GeoTIFFs) |
-| **USGS 3DEP** | DSM (Raster) | **False Positive Filtering**. Check Height Above Ground (HAG). | `src/fusion/context_filters.py` |
-| **OpenStreetMap** | Vector | **Context**. Road proximity & filter. | `src/fusion/context_filters.py` |
-| **FAA Obstacles** | Data (CSV) | **Ground Truth**. Validates transmission towers >200ft & airport assets. | `src/ingestion/connectors/faa_obstacles.py` |
-| **PASDA Roads** | Vector (Shapefile) | **Precision**. Superior road centerlines for Pennsylvania. | `src/ingestion/connectors/pasda_roads.py` |
-| **OpenInfraMap** | Vector (WFS) | **Grid Context**. Maps high-voltage transmission lines. | `src/ingestion/connectors/openinframap.py` |
-| **Mapillary** | Street Imagery | **Defect Verification**. Visual check for rust/leaning. | `src/ingestion/connectors/mapillary.py` |
-| **USGS Lidar** | Point Cloud (LAZ) | **Verticality**. Confirms "Pole vs Tree" signature. | `src/ingestion/connectors/usgs_lidar.py` |
-
-All connectors are modularly located in `src/ingestion/connectors/`. The system gracefully degrades if optional keys (e.g., Mapillary) are missing.
+| Source | Role | Implementation |
+| :--- | :--- | :--- |
+| **NAIP** | **Detection**. High-res (1m) aerial photography. | `ingest_imagery.py` |
+| **USGS 3DEP** | **Enrichment**. Height Above Ground (HAG) verification. | `src/fusion/context_filters.py` |
+| **PASDA Roads** | **Context**. Precision road centerlines. | `src/fusion/context_filters.py` |
+| **FAA Obstacles** | **Validation**. Ground truth for towers >200ft. | `src/ingestion/connectors/faa_obstacles.py` |
+| **OpenInfraMap** | **Grid Context**. High-voltage transmission lines. | `src/ingestion/connectors/openinframap.py` |
 
 ---
 
@@ -203,10 +157,10 @@ All connectors are modularly located in `src/ingestion/connectors/`. The system 
 │   ├── database.py           # Engine Config
 │   └── routers/              # FastAPI Endpoints
 ├── src/                      # Shared Python Core
-│   ├── pipeline/             # NEW: Pipeline Microservices
-│   │   ├── runner.py         # Entry Point
-│   │   ├── detect.py
-│   │   └── ...
+│   ├── pipeline/             # Pipeline Microservices
+│   │   ├── runner.py         # Loop Runner
+│   │   ├── detect.py         # UNIFIED Service (Detect/Enrich/Fuse)
+│   │   └── fusion_engine.py  # Fusion Logic Class
 │   └── detection/            # YOLO/CLIP Model Wrappers
 ├── docker-compose.enterprise.yml # Services Definition
 └── README.md                 # This file

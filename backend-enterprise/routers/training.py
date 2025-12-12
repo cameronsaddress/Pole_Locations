@@ -41,7 +41,7 @@ async def run_script(script_path: str, args: list):
     # Map local relative path (src/...) to container workspace path (/workspace/src/...)
     container_script_path = f"/workspace/{script_path}"
     
-    cmd = ["/usr/bin/docker", "exec", "polelocations-gpu", "python", "-u", container_script_path] + [str(a) for a in args]
+    cmd = ["/usr/bin/docker", "exec", "polevision-gpu", "python", "-u", container_script_path] + [str(a) for a in args]
     logger.info(f"Running in GPU Container: {' '.join(cmd)}")
     
     proc = await asyncio.create_subprocess_exec(
@@ -296,7 +296,7 @@ async def stop_training():
 
     # Ensure heavy process inside container is killed
     try:
-        cmd = ["/usr/bin/docker", "exec", "polelocations-gpu", "pkill", "-f", "train_detector.py"]
+        cmd = ["/usr/bin/docker", "exec", "polevision-gpu", "pkill", "-f", "train_detector.py"]
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await proc.wait()
         logger.info("Sent pkill to GPU container.")
@@ -327,7 +327,7 @@ async def run_production_inference(limit: int = 15, task: str = "full"):
     # script_path = "src/training/run_production_job.py"
     # Execute in GPU Container
     container_script_path = "/workspace/src/training/run_production_job.py"
-    cmd = ["/usr/bin/docker", "exec", "polelocations-gpu", "python", "-u", container_script_path, "--limit", str(limit), "--task", task]
+    cmd = ["/usr/bin/docker", "exec", "polevision-gpu", "python", "-u", container_script_path, "--limit", str(limit), "--task", task]
     
     logger.info(f"Starting Production Deployment: {cmd}")
     

@@ -377,6 +377,7 @@ class PoleDetector:
             candidates.append(Path(model_path))
 
         candidates.extend([
+            CHECKPOINTS_DIR / "yolo11l_full_run" / "weights" / "best.pt",
             CHECKPOINTS_DIR / "yolo11l_pole_v1" / "weights" / "best.pt",
             MODELS_DIR / "pole_detector_real.pt",
             # Legacy checkpoints removed to enforce YOLO11 usage
@@ -764,12 +765,10 @@ class PoleDetector:
                     # For zero-shot-image-classification it returns list of dicts if single input, or list of lists if multiple?
                     # Actually standard pipeline output for multiple images is a list of dicts.
                     
-                    # HuggingFace pipeline format for zero-shot image:
-                    # [{'label': 'leaning...', 'score': 0.9}, ...] -> No, it returns one dict per image with 'labels' and 'scores' lists
-                    # Let's verify standard behavior. usually: {'labels': [...], 'scores': [...]}
-                    
-                    top_label = res['labels'][0]
-                    top_score = res['scores'][0]
+                    # Correct format for batched output: res is a list of dicts [{'label':..., 'score':...}, ...]
+                    top_prediction = res[0]
+                    top_label = top_prediction['label']
+                    top_score = top_prediction['score']
                     
                     if top_score > self.classification_confidence:
                         class_name = "pole_good"

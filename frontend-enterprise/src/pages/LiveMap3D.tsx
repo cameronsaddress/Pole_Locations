@@ -242,11 +242,12 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                 cluster: false
             })
 
-            // Glow
+            // Glow - HIDDEN UNTIL ZOOMED IN
             map.current.addLayer({
                 id: 'assets-glow',
                 type: 'circle',
                 source: 'assets',
+                minzoom: 12, // Only show when close
                 paint: {
                     'circle-radius': 12,
                     'circle-color': ['match', ['get', 'status'], 'Verified', '#22c55e', 'Moved', '#f97316', 'New', '#06b6d4', 'Review', '#f59e0b', '#ef4444'],
@@ -255,11 +256,12 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                 }
             })
 
-            // Core Dot
+            // Core Dot - HIDDEN UNTIL ZOOMED IN
             map.current.addLayer({
                 id: 'assets-point',
                 type: 'circle',
                 source: 'assets',
+                minzoom: 12, // Only show when close
                 paint: {
                     'circle-radius': 4,
                     'circle-color': '#ffffff',
@@ -327,55 +329,47 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
 
             // ---------------------------------------------------------
-            // 4. SMART TARGETING & CINEMATIC LANDING
+            // 4. SMART TARGETING & CINEMATIC LANDING (IMMEDIATE)
             // ---------------------------------------------------------
+            const TARGET_LAT = 40.19
+            const TARGET_LNG = -76.73
 
-            // Fetch first, then animate based on data
-            const loadedAssets = await fetchAssets()
+            // START ZOOM IMMEDIATELY (Do not wait for data)
+            map.current?.flyTo({
+                center: [TARGET_LNG, TARGET_LAT],
+                zoom: 11,
+                pitch: 0,
+                bearing: 0,
+                speed: 1.2,
+                curve: 1.5,
+                essential: true
+            })
 
-            if (loadedAssets && loadedAssets.length > 0) {
-                // Find "Hero Pole" near our target region (Manchester/Mt Wolf)
-                // Target: [-76.73, 40.19]
-                const targetLat = 40.19
-                const targetLng = -76.73
-
-                // Sort by distance to target
-                const heroPole = loadedAssets.sort((a, b) => {
-                    const distA = Math.sqrt(Math.pow(a.lat - targetLat, 2) + Math.pow(a.lng - targetLng, 2))
-                    const distB = Math.sqrt(Math.pow(b.lat - targetLat, 2) + Math.pow(b.lng - targetLng, 2))
-                    return distA - distB
-                })[0]
-
-                console.log("Hero Target Identified:", heroPole.id)
-
-                // Sequence
-                setTimeout(() => {
-                    // Phase 1: Fly to Region (High)
-                    map.current?.flyTo({
-                        center: [heroPole.lng, heroPole.lat],
-                        zoom: 11,
-                        pitch: 0,
-                        bearing: 0,
-                        speed: 1.2,
-                        curve: 1.5,
-                        essential: true
-                    })
-
-                    // VISUALIZE HERO EARLY (Before Landing)
+            // FETCH DATA IN BACKGROUND
+            fetchAssets().then(loadedAssets => {
+                if (loadedAssets && loadedAssets.length > 0) {
+                    // Data Loaded! 
+                    // Wait for flyTo to be near completion, then adjust
                     setTimeout(() => {
-                        setActivePoles([heroPole]) // Show it while high up!
-                    }, 2000)
+                        // Find Hero Pole
+                        const heroPole = loadedAssets.sort((a, b) => {
+                            const distA = Math.sqrt(Math.pow(a.lat - TARGET_LAT, 2) + Math.pow(a.lng - TARGET_LNG, 2))
+                            const distB = Math.sqrt(Math.pow(b.lat - TARGET_LAT, 2) + Math.pow(b.lng - TARGET_LNG, 2))
+                            return distA - distB
+                        })[0]
 
-                    // Phase 2: Swoop DIRECTLY to Hero
-                    setTimeout(() => {
+                        // Phase 2: Swoop DIRECTLY to Hero (Micro-adjustment)
                         map.current?.easeTo({
-                            center: [heroPole.lng, heroPole.lat - 0.005], // Offset slightly south so pole is "above" center (bottom up)
-                            zoom: 15,    // Tight zoom on THE pole
+                            center: [heroPole.lng, heroPole.lat - 0.005],
+                            zoom: 15,
                             pitch: 78,
                             bearing: 25,
                             duration: 5000,
                             essential: true
                         })
+
+                        // Visualize Hero
+                        setActivePoles([heroPole])
 
                         // Resume Orbit
                         setTimeout(() => {
@@ -383,12 +377,9 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                             setIsRotating(true)
                         }, 5500)
 
-                    }, 3000) // Start swoop
-
-                }, 500)
-            } else {
-                console.warn("No assets found for sequence")
-            }
+                    }, 3000) // Wait for flight Phase 1
+                }
+            })
         })
 
         // Animation Loop for Rotation

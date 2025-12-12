@@ -88,14 +88,19 @@ async def get_assets_list(
     # For now, simplistic Python-side query builder as SQLModel doesn't expose ST_ easily without func
     # Ideally: query = query.where(func.ST_Intersects(Pole.location, make_envelope(...)))
     
-    # Simple Lat/Lon filter (PostGIS will optimise if we cast geometry, but this is fine for mild load)
-    # Actually, proper PostGIS way:
-    # from geoalchemy2 import func
-    # if min_lat:
-    #    query = query.where(func.ST_Y(Pole.location) >= min_lat)
+    from geoalchemy2 import func
+    
+    if min_lat:
+        query = query.where(func.ST_Y(Pole.location) >= min_lat)
+    if max_lat:
+        query = query.where(func.ST_Y(Pole.location) <= max_lat)
+    if min_lng:
+        query = query.where(func.ST_X(Pole.location) >= min_lng)
+    if max_lng:
+        query = query.where(func.ST_X(Pole.location) <= max_lng)
     
     # Basic pagination limit for safety
-    query = query.limit(5000) 
+    query = query.limit(10000) 
     
     results = db.exec(query).all()
     
