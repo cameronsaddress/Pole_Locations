@@ -88,7 +88,7 @@ async def get_assets_list(
     # For now, simplistic Python-side query builder as SQLModel doesn't expose ST_ easily without func
     # Ideally: query = query.where(func.ST_Intersects(Pole.location, make_envelope(...)))
     
-    from geoalchemy2 import func
+    from sqlalchemy import func
     
     if min_lat:
         query = query.where(func.ST_Y(Pole.location) >= min_lat)

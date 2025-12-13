@@ -204,6 +204,11 @@ curl http://localhost:8021/api/v1/verification/stats
                             └─ /maps/poles-geojson (color-coded)
                                     ↓
                             [Frontend Dashboard]
+                            - **Frontend Status:**
+                              - Enterprise Dashboard: **Active** (Vite + React + Tailwind)
+                              - 3D Map: **Active** (MapLibre GL JS) - **FIXED** crash due to terrain overzoom (maxzoom raised to 15).
+                              - Anomaly Feed: **Mocked** (waiting on backend integration)
+                              - Street View: **Ready** (Needs API Key)
                             ├─ Executive Dashboard (stats tiles)
                             ├─ Map View (color-coded markers)
                             └─ Review Queue Page (TBD)

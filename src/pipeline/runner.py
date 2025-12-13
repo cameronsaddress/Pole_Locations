@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 def run_pipeline(data_dirs, continuous=False):
     logger.info("🚀 Starting Unified Enterprise Pipeline run...")
     
+    # 0. Clean DB (Optional but good for demo integrity if we want to be sure)
+    # Actually, let's keep it additive unless requested.
+    # BUT, the user wants to be sure it works.
+    # Let's just rely on the limit increase.
+    
     # 1. Ingest
     logging.info("--- Stage 1: Ingestion ---")
     ingest_imagery_tiles(data_dirs)
@@ -18,7 +23,7 @@ def run_pipeline(data_dirs, continuous=False):
     # 2. Unified Detection Service
     # (Inference -> Enrichment -> Fusion -> Persistence)
     logging.info("--- Stage 2: Unified Detection & Fusion ---")
-    run_detection_service(limit=1000)
+    run_detection_service(limit=10000) # Increased limit to ensure full coverage
     
     logger.info("✅ Pipeline Run Complete.")
 

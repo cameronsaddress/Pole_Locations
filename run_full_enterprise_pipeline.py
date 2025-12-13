@@ -71,6 +71,25 @@ def main():
         # Import here to avoid overhead if not needed globally, or move to top
         from src.utils.integrity import scan_and_repair
         scan_and_repair(target_dirs)
+        
+        # Ensure Grid Backbone Exists
+        grid_file = Path("/workspace/data/processed/grid_backbone.geojson")
+        if not grid_file.exists():
+            logger.info("--- [PRE-FLIGHT] Grid Backbone Missing. Fetching from OpenInfraMap... ---")
+             # We need to call the function directly or via script.
+            # Easiest is to invoke python -c or a thin script
+            cmd = "python3 -c \"from src.ingestion.connectors.openinframap import fetch_grid_backbone; fetch_grid_backbone()\""
+            run_command(cmd)
+        else:
+            logger.info("✅ Grid Backbone Exists.")
+            
+        # Ensure Water Data Exists
+        water_file = Path("/workspace/data/processed/water_osm.geojson")
+        if not water_file.exists():
+            logger.info("--- [PRE-FLIGHT] Water Data Missing. Fetching from OSM (Overpass)... ---")
+            run_command("python src/ingestion/fetch_regional_water.py")
+        else:
+             logger.info("✅ Water Data Exists.")
     else:
         logger.info("⏭️  Skipping Data Integrity Check (User Request).")
 

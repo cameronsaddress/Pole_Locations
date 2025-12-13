@@ -7,7 +7,7 @@ from database import engine
 from models import Tile, Detection
 from src.detection.pole_detector import PoleDetector
 from src.pipeline.fusion_engine import FusionEngine 
-from src.fusion.context_filters import annotate_context_features
+from src.fusion.context_filters import annotate_context_features, filter_implausible_detections
 from geoalchemy2.shape import from_shape
 from shapely.geometry import Point
 from datetime import datetime
@@ -15,19 +15,25 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def run_detection_service(limit: int = 10):
+def run_detection_service(limit: int = 1000, target_path: str = None):
     logger.info("Starting Enterprise Detection Service (Unified Detect/Enrich/Fuse)...")
     
     # Initialize components
     detector = PoleDetector() 
     fusion = FusionEngine()
-
+    
     with Session(engine) as session:
-        # Get pending tiles
-        statement = select(Tile).where(
-            (Tile.status == "Pending") | 
-            ((Tile.status == "Failed") & (Tile.retry_count < 3))
-        ).limit(limit)
+        # Get pending tiles (Case insensitive check)
+        if target_path:
+            logger.info(f"Configuration: Targeting specific tile: {target_path}")
+            statement = select(Tile).where(Tile.path == target_path)
+        else:
+            statement = select(Tile).where(
+                (Tile.status == "Pending") | 
+                (Tile.status == "pending") |
+                ((Tile.status == "Failed") & (Tile.retry_count < 3))
+            ).limit(limit)
+        
         tiles = session.exec(statement).all()
         
         if not tiles:
@@ -36,6 +42,8 @@ def run_detection_service(limit: int = 10):
 
         for tile in tiles:
             logger.info(f"Processing tile {tile.id}: {tile.path}")
+            run_id = f"tile_{tile.id}"
+            
             try:
                 # 1. Update Status
                 tile.status = "Running"
@@ -56,7 +64,7 @@ def run_detection_service(limit: int = 10):
                 logger.info(f"Tile {tile.id}: Found {len(results)} raw detections.")
                 
                 if not results:
-                    tile.status = "Processed"
+                    tile.status = "processed"
                     tile.last_processed_at = datetime.utcnow()
                     session.add(tile)
                     session.commit()
@@ -70,11 +78,18 @@ def run_detection_service(limit: int = 10):
                 df["lon"] = df["lon"].astype(float)
                 
                 # Enrich with Roads, DSM, Water
-                # This function handles file loading internally
+                # This function handles file loading internally (now optimized)
                 logger.info("  -> running full context enrichment...")
                 df = annotate_context_features(df)
                 
-                # 5. Insert to DB
+                # Filter Junk
+                logger.info("  -> filtering implausible detections...")
+                df, dropped = filter_implausible_detections(df, max_road_distance_m=200.0, drop_failures=True)
+                if not dropped.empty:
+                    logger.info(f"  Dropped {len(dropped)} detections (context filters)")
+                
+                # 5. Build Detections
+                detections_to_add = []
                 for _, row in df.iterrows():
                     point = Point(row['lon'], row['lat'])
                     
@@ -89,27 +104,29 @@ def run_detection_service(limit: int = 10):
                         confidence=float(row['ai_confidence']),
                         class_name=row.get('class_name', "Unknown"),
                         image_path=str(tile.path), 
-                        run_id=f"tile_{tile.id}",
+                        run_id=run_id,
                         location=from_shape(point, srid=4326), 
                         road_distance_m=rd_dist,
                         height_ag_m=hag,
                         created_at=datetime.utcnow()
                     )
-                    session.add(det)
+                    detections_to_add.append(det)
 
-                # 6. Commit Detections
-                session.commit() 
+                # 6. Bulk Insert Detections
+                if detections_to_add:
+                    session.add_all(detections_to_add)
+                    session.commit() 
 
-                # 7. Run Fusion Immediately
-                fusion.run_fusion(session)
+                    # 7. Run Fusion Immediately on this Batch
+                    fusion.run_fusion(session, run_id=run_id)
                 
                 # 8. Finalize Tile
-                tile.status = "Processed"
+                tile.status = "processed"
                 tile.last_processed_at = datetime.utcnow()
                 session.add(tile)
                 session.commit()
                 
-                logger.info(f"✅ Tile {tile.id} complete.")
+                logger.info(f"✅ Tile {tile.id} complete. ({len(detections_to_add)} detections)")
                 
             except Exception as e:
                 logger.error(f"❌ Failed tile {tile.id}: {e}", exc_info=True)

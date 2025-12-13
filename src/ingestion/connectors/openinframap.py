@@ -21,23 +21,53 @@ def fetch_grid_backbone(bbox=None):
     if bbox is None:
         bbox = EAST_COAST_BBOX
         
+    # Overpass QL
+    # Fetch high voltage lines and towers
     query = f"""
-    [out:json][timeout:25];
+    [out:json][timeout:60];
     (
       way["power"="line"]({bbox['miny']},{bbox['minx']},{bbox['maxy']},{bbox['maxx']});
       node["power"="tower"]({bbox['miny']},{bbox['minx']},{bbox['maxy']},{bbox['maxx']});
     );
+    /* Recurse down to get geometry */
+    (._;>;);
     out geom;
     """
     
     try:
-        response = requests.post(OVERPASS_URL, data=query)
+        logger.info("Fetching Grid Backbone from Overpass...")
+        response = requests.post(OVERPASS_URL, data={'data': query})
         response.raise_for_status()
         data = response.json()
         
-        # Convert to GeoDataFrame
-        # This requires parsing Overpass JSON to features
-        # ... (Simplified logic for now)
+        # Convert to GeoJSON
+        features = []
+        for element in data['elements']:
+            if element['type'] == 'way' and 'geometry' in element:
+                coords = [[pt['lon'], pt['lat']] for pt in element['geometry']]
+                features.append({
+                    "type": "Feature",
+                    "properties": element.get("tags", {}),
+                    "geometry": { "type": "LineString", "coordinates": coords }
+                })
+            elif element['type'] == 'node':
+                features.append({
+                    "type": "Feature",
+                    "properties": element.get("tags", {}),
+                    "geometry": { "type": "Point", "coordinates": [element['lon'], element['lat']] }
+                })
+
+        if not features:
+            logger.warning("No grid backbone features found.")
+            return False
+
+        fc = {"type": "FeatureCollection", "features": features}
+        gdf = gpd.GeoDataFrame.from_features(fc, crs="EPSG:4326")
+        
+        output_path = DATA_DIR / "processed" / "grid_backbone.geojson"
+        gdf.to_file(output_path, driver="GeoJSON")
+        logger.info(f"✅ Grid Backbone saved ({len(gdf)} features) to {output_path}")
+        
         return True
     except Exception as e:
         logger.error(f"Overpass Query Failed: {e}")
@@ -57,11 +87,40 @@ class GridConnector:
         if self.gdf is None or self.gdf.empty:
             return [None] * len(lat_lons)
             
+        # Create points GDF
         points = gpd.GeoDataFrame(
             geometry=gpd.points_from_xy([lon for lat, lon in lat_lons], [lat for lat, lon in lat_lons]),
             crs="EPSG:4326"
         )
         
-        # Project for metric distance
-        # ... logic ...
-        return [0.0] * len(lat_lons) # Placeholder
+        # Ensure we have metric projection for accurate distance
+        if self.gdf.crs.is_geographic:
+             try:
+                 utm = self.gdf.estimate_utm_crs()
+                 grid_metric = self.gdf.to_crs(utm)
+             except:
+                 # Fallback if global coverage makes estimate ambiguous 
+                 grid_metric = self.gdf.to_crs("EPSG:3857")
+        else:
+             grid_metric = self.gdf
+             
+        points_metric = points.to_crs(grid_metric.crs)
+        
+        # Use sindex for fast nearest search
+        nearest_idxs = grid_metric.sindex.nearest(
+            points_metric.geometry, 
+            return_all=False, 
+            return_distance=False
+        )
+        
+        # Calculation
+        nearest_lines = grid_metric.geometry.iloc[nearest_idxs[1]].reset_index(drop=True)
+        input_pts = points_metric.geometry.iloc[nearest_idxs[0]].reset_index(drop=True)
+        
+        dists = input_pts.distance(nearest_lines)
+        
+        # Re-align with original index order (nearest_idxs[0] are input indices)
+        results = pd.Series(index=points.index, dtype=float)
+        results.iloc[nearest_idxs[0]] = dists.values
+        
+        return results.tolist()

@@ -66,17 +66,26 @@ def load_osm_data():
             # Create Point
             pt = Point(float(lon), float(lat))
             
-            # Create Model
-            pole = Pole(
-                pole_id=str(pid),
-                status=status,
-                financial_impact=0.0, # We can recalc this or migrate it if columns exist
-                height_ag_m=float(row.get("height_ag_m", 0)) if pd.notna(row.get("height_ag_m")) else None,
-                location=from_shape(pt, srid=4326),
-                tags={"source": "migration_script", "original_row": idx}
-            )
+            # Check if exists
+            existing_pole = session.exec(select(Pole).where(Pole.pole_id == str(pid))).first()
             
-            session.add(pole)
+            if existing_pole:
+                # Update
+                existing_pole.status = status
+                existing_pole.location = from_shape(pt, srid=4326)
+                existing_pole.tags = {"source": "migration_script", "original_row": idx, "update": True}
+                session.add(existing_pole)
+            else:
+                # Create Model
+                pole = Pole(
+                    pole_id=str(pid),
+                    status=status,
+                    financial_impact=0.0,
+                    height_ag_m=float(row.get("height_ag_m", 0)) if pd.notna(row.get("height_ag_m")) else None,
+                    location=from_shape(pt, srid=4326),
+                    tags={"source": "migration_script", "original_row": idx}
+                )
+                session.add(pole)
             count += 1
             if count % 1000 == 0:
                 print(f"Staged {count} poles...")

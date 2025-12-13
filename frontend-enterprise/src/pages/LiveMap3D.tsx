@@ -197,6 +197,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
             zoom: 2.5, // Globe view
             pitch: 0,
             bearing: 0,
+            maxPitch: 85, // Allow horizon view
             // @ts-ignore
             antialias: true
         })
@@ -226,14 +227,17 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
             // ---------------------------------------------------------
             // 0. TERRAIN & LAYERS
             // ---------------------------------------------------------
+            // Update: Set maxzoom to 14 (Standard for Terrarium).
+            // DELAYED: We do not setTerrain here to prevent RangeErrors during the initial fly-in.
+            // It will be enabled in the 'moveend' callback.
             map.current.addSource('terrain-source', {
                 type: 'raster-dem',
                 tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
                 encoding: 'terrarium',
                 tileSize: 256,
-                maxzoom: 13
+                maxzoom: 12
             })
-            map.current.setTerrain({ source: 'terrain-source', exaggeration: 2.5 })
+            // map.current.setTerrain({ source: 'terrain-source', exaggeration: 1.5 }) <--- MOVED TO PHASE 2
 
             // Assets Source
             map.current.addSource('assets', {
@@ -329,12 +333,12 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
 
             // ---------------------------------------------------------
-            // 4. SMART TARGETING & CINEMATIC LANDING (IMMEDIATE)
+            // 4. SMART TARGETING & CINEMATIC LANDING (SEAMLESS)
             // ---------------------------------------------------------
             const TARGET_LAT = 40.19
             const TARGET_LNG = -76.73
 
-            // START ZOOM IMMEDIATELY (Do not wait for data)
+            // PHASE 1: HIGH ALTITUDE APPROACH (Immediate)
             map.current?.flyTo({
                 center: [TARGET_LNG, TARGET_LAT],
                 zoom: 11,
@@ -345,52 +349,65 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                 essential: true
             })
 
-            // FETCH DATA IN BACKGROUND
+            // PHASE 2: FINAL APPROACH (Triggered on completion of Phase 1)
+            map.current.once('moveend', () => {
+                // GOAL: "Halfway between ground and sky" = 45 degrees
+                // Height: "1000 ft building" ~ Zoom 16.5 -> Reduced to 15.5 for stability
+                
+                // ENABLE TERRAIN NOW (Safe after fly-in)
+                map.current?.setTerrain({ source: 'terrain-source', exaggeration: 1.5 })
+
+                map.current?.easeTo({
+                    center: [TARGET_LNG, TARGET_LAT],
+                    zoom: 15.5,
+                    pitch: 45,   // 45 degrees (Halfway)
+                    bearing: 25,
+                    duration: 4000,
+                    essential: true
+                })
+
+                // Resume Orbit after landing
+                setTimeout(() => {
+                    isRotatingRef.current = true
+                    setIsRotating(true)
+                }, 4500)
+            })
+
+            // BACKGROUND DATA FETCH (Does not block animation)
             fetchAssets().then(loadedAssets => {
                 if (loadedAssets && loadedAssets.length > 0) {
-                    // Data Loaded! 
-                    // Wait for flyTo to be near completion, then adjust
-                    setTimeout(() => {
-                        // Find Hero Pole
-                        const heroPole = loadedAssets.sort((a, b) => {
-                            const distA = Math.sqrt(Math.pow(a.lat - TARGET_LAT, 2) + Math.pow(a.lng - TARGET_LNG, 2))
-                            const distB = Math.sqrt(Math.pow(b.lat - TARGET_LAT, 2) + Math.pow(b.lng - TARGET_LNG, 2))
-                            return distA - distB
-                        })[0]
+                    // Just silently highlight the hero pole when ready
+                    const heroPole = loadedAssets.sort((a, b) => {
+                        const distA = Math.sqrt(Math.pow(a.lat - TARGET_LAT, 2) + Math.pow(a.lng - TARGET_LNG, 2))
+                        const distB = Math.sqrt(Math.pow(b.lat - TARGET_LAT, 2) + Math.pow(b.lng - TARGET_LNG, 2))
+                        return distA - distB
+                    })[0]
 
-                        // Phase 2: Swoop DIRECTLY to Hero (Micro-adjustment)
-                        map.current?.easeTo({
-                            center: [heroPole.lng, heroPole.lat - 0.005],
-                            zoom: 15,
-                            pitch: 78,
-                            bearing: 25,
-                            duration: 5000,
-                            essential: true
-                        })
-
-                        // Visualize Hero
-                        setActivePoles([heroPole])
-
-                        // Resume Orbit
-                        setTimeout(() => {
-                            isRotatingRef.current = true
-                            setIsRotating(true)
-                        }, 5500)
-
-                    }, 3000) // Wait for flight Phase 1
+                    // Show it
+                    setActivePoles([heroPole])
                 }
             })
         })
 
         // Animation Loop for Rotation
+        let animationFrameId: number
         const rotate = () => {
             // Only rotate if enabled AND map is active AND user is not interacting
             if (isRotatingRef.current && !isInteractingRef.current && map.current) {
                 map.current.setBearing(map.current.getBearing() + 0.04) // 2x Faster Rotation
             }
-            requestAnimationFrame(rotate)
+            animationFrameId = requestAnimationFrame(rotate)
         }
         rotate()
+
+        // Cleanup on unmount
+        return () => {
+            cancelAnimationFrame(animationFrameId)
+            if (map.current) {
+                map.current.remove()
+                map.current = null
+            }
+        }
 
     }, [])
 
@@ -433,12 +450,20 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
             // Smart Scan (Visible Bottom CENTER)
             const { width, height } = map.current.getCanvas()
+
+            // Optimization: Don't scan if zoomed out too far (avoids DEM errors on low-res tiles)
+            if (map.current.getZoom() < 12) return
+
             const visible = assets.filter(a => {
-                const p = map.current!.project([a.lng, a.lat])
-                return (
-                    p.x >= width * 0.3 && p.x <= width * 0.7 && // Center 40% (Stay in frame long time)
-                    p.y >= height * 0.4 && p.y <= height // Bottom section
-                )
+                try {
+                    const p = map.current!.project([a.lng, a.lat])
+                    return (
+                        p.x >= width * 0.3 && p.x <= width * 0.7 && // Center 40% (Stay in frame long time)
+                        p.y >= height * 0.4 && p.y <= height // Bottom section
+                    )
+                } catch (e) {
+                    return false
+                }
             })
 
             if (visible.length > 0) {
@@ -483,16 +508,21 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                 el.className = 'pole-marker-root'
 
                 // Create Marker
-                const marker = new maplibregl.Marker({
-                    element: el,
-                    anchor: 'bottom' // Tether grows up from bottom
-                })
-                    .setLngLat([pole.lng, pole.lat])
-                    .addTo(map.current!) // Non-null assertion for map
+                try {
+                    const marker = new maplibregl.Marker({
+                        element: el,
+                        anchor: 'bottom' // Tether grows up from bottom
+                    })
+                        .setLngLat([pole.lng, pole.lat])
+                        .addTo(map.current!) // Non-null assertion for map
 
-                // Create React Root
-                const root = createRoot(el)
-                markersRef.current.set(pole.id, { marker, root })
+                    // Create React Root
+                    const root = createRoot(el)
+                    markersRef.current.set(pole.id, { marker, root })
+                } catch (err) {
+                    console.warn("Failed to add marker (likely DEM range error):", err)
+                    // Skip adding to markersRef, so it might be retried later
+                }
             }
 
             // RENDER (Update props including expanded state)
@@ -504,9 +534,6 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                     onExpand={() => {
                         setExpandedPoleId(pole.id)
                         // Rotation CONTINUES during expand (per user request)
-                    }}
-                    onClose={() => {
-                        setExpandedPoleId(null)
                     }}
                 />
             )

@@ -27,112 +27,88 @@ from src.config import (
 
 from src.ingestion.connectors.pasda_roads import PASDAConnector
 
+# Global Cache for Roads to prevent re-reading checks
+_ROADS_CACHE = None
+
 def annotate_with_roads(
     detections_df: pd.DataFrame,
     roads_path: Optional[Path] = None,
 ) -> pd.DataFrame:
     """Append nearest-road distance (meters) to each detection."""
+    global _ROADS_CACHE
     
-    # Try PASDA first (Superior for PA)
-    pasda = PASDAConnector()
-    if pasda.get_roads_gdf() is not None:
-        roads_gdf = pasda.get_roads_gdf()
-    elif roads_path is None:
-        # Fallback to OSM
-        roads_path = PROCESSED_DATA_DIR / "roads_osm.geojson"
-        if roads_path.exists():
-            roads_gdf = gpd.read_file(roads_path)
-        else:
-            roads_gdf = gpd.GeoDataFrame()
-    else:
-        roads_gdf = gpd.read_file(roads_path)
-
-    if roads_gdf.empty or detections_df.empty:
+    if detections_df.empty:
         detections_df = detections_df.copy()
         detections_df["road_distance_m"] = pd.NA
         return detections_df
+        
+    # Get Roads GDF
+    roads_gdf = None
     
-    # ... Rest of logic stays similar but using the selected gdf ...
-    roads_gdf = roads_gdf[["geometry"]].dropna().reset_index(drop=True)
-    roads_crs = roads_gdf.crs or "EPSG:4326"
-
-
+    # Check Cache
+    if _ROADS_CACHE is not None:
+        roads_gdf = _ROADS_CACHE
+    else:
+        # Try PASDA first (Superior for PA)
+        pasda = PASDAConnector()
+        if pasda.get_roads_gdf() is not None:
+            roads_gdf = pasda.get_roads_gdf()
+        elif roads_path is None:
+            # Fallback to OSM
+            roads_path = PROCESSED_DATA_DIR / "roads_osm.geojson"
+            if roads_path.exists():
+                roads_gdf = gpd.read_file(roads_path)
+            else:
+                roads_gdf = gpd.GeoDataFrame()
+        elif roads_path:
+             roads_gdf = gpd.read_file(roads_path)
+             
+        # Optimize & Cache
+        if roads_gdf is not None and not roads_gdf.empty:
+            roads_gdf = roads_gdf[["geometry"]].dropna().reset_index(drop=True)
+            if roads_gdf.crs is None:
+                roads_gdf.set_crs("EPSG:4326", inplace=True)
+            # Project to UTM for metric distance
+            try:
+                utm = roads_gdf.estimate_utm_crs()
+                roads_gdf = roads_gdf.to_crs(utm)
+            except:
+                pass # Stay in WGS84 (deg) if fails
+            
+            # Force spatial index build
+            _ = roads_gdf.sindex
+            _ROADS_CACHE = roads_gdf
+    
+    if roads_gdf is None or roads_gdf.empty:
+         detections_df = detections_df.copy()
+         detections_df["road_distance_m"] = pd.NA
+         return detections_df
+         
+    # Prepare Detections
     detections_gdf = gpd.GeoDataFrame(
         detections_df.copy(),
         geometry=gpd.points_from_xy(detections_df["lon"], detections_df["lat"]),
         crs="EPSG:4326",
     )
-
-    roads_projected = roads_gdf.to_crs(roads_crs)
-    detections_projected = detections_gdf.to_crs(roads_crs)
-
-    try:
-        metric_crs = roads_projected.estimate_utm_crs()
-    except Exception:
-        metric_crs = None
-
-    if metric_crs:
-        roads_projected = roads_projected.to_crs(metric_crs)
-        detections_projected = detections_projected.to_crs(metric_crs)
-
-    road_geoms = roads_projected.geometry
+    detections_projected = detections_gdf.to_crs(roads_gdf.crs)
     
-    # Optimize using Spatial Index (sindex)
-    # We want the distance from each detection to the NEAREST road.
-    # calculate nearest geometry using sindex
-    
-    if road_geoms.empty:
-         detections_df = detections_df.copy()
-         detections_df["road_distance_m"] = pd.NA
-         return detections_df
-
-    # Ensure sindex exists
-    _ = road_geoms.sindex
-    
-    # For every detection, find the nearest road index
-    # validation: query_bulk is efficient
-    # We can use geometry.distance to the nearest only
-    
-    # But simpler: use direct apply is slow.
-    # We use nearest_points from shapely.ops? No, existing sindex method is better.
-    
-    # roads_projected.sindex.nearest returns indices of [input_geom_idx, tree_geom_idx]
-    
-    # Let's stick to a robust method:
-    # 1. For each point, find the nearest items in the index (with a buffer if possible, or just nearest).
-    # GeoPandas has `sindex.nearest` which is great.
-    
-    nearest_idxs = roads_projected.sindex.nearest(
+    # Calculate Nearest Distance (Vectorized)
+    # Using sindex.nearest which is highly optimized
+    nearest_idxs = roads_gdf.sindex.nearest(
         detections_projected.geometry, 
         return_all=False, 
         return_distance=False
     )
-    # nearest_idxs is [input_indices, right_indices]
     
-    # Calculate distance only to the identified nearest road
-    # Map detection index to road geometry
-    
-    distances = []
-    # nearest_idxs[0] are indices in detections_projected
-    # nearest_idxs[1] are indices in roads_projected (iloc)
-    
-    # Sort by query index to align? No, detections_projected has an index.
-    
-    # Let's align them.
-    # Create a Series of nearest road geometries aligned with detections
-    nearest_roads = roads_projected.geometry.iloc[nearest_idxs[1]].reset_index(drop=True)
-    # Align the input geoms
+    # Get geometries to compute actual distance
+    nearest_roads_geom = roads_gdf.geometry.iloc[nearest_idxs[1]].reset_index(drop=True)
     input_geoms = detections_projected.geometry.iloc[nearest_idxs[0]].reset_index(drop=True)
     
-    # Compute distances
-    computed_dists = input_geoms.distance(nearest_roads)
+    dists = input_geoms.distance(nearest_roads_geom)
     
-    # Now map back to original index
-    # We need to assign these distances to the ORIGINAL index of detections_df
-    # nearest_idxs[0] corresponds to iloc in detections_projected.
-    
+    # Assign back
     results = pd.Series(index=detections_projected.index, dtype=float)
-    results.iloc[nearest_idxs[0]] = computed_dists.values
+    results.iloc[nearest_idxs[0]] = dists.values
     
     detections_df = detections_df.copy()
     detections_df["road_distance_m"] = results
@@ -152,131 +128,109 @@ def annotate_with_dsm(
         detections_df["surface_elev_m"] = pd.NA
         return detections_df
         
+    # Scan Tiles (Should allow caching this index too, but it's fast)
     tif_files = list(dsm_dir.glob("*.tif"))
     if not tif_files:
-        logger.warning(f"No DSM tiles found in {dsm_dir}")
         detections_df = detections_df.copy()
         detections_df["surface_elev_m"] = pd.NA
         return detections_df
 
-    tiles: List[Dict] = []
+    tiles = []
     tile_geoms = []
     
-    # Pre-scan tiles
-    for i, tif in enumerate(dsm_dir.glob("*.tif")):
+    for tif in tif_files:
         try:
-            # lightweight open just to get bounds first?
-            # Rasterio open is somewhat lazy but repeated open is bad.
-            # We keep them open? No, too many file descriptors.
-            # Just read bounds.
             with rasterio.open(tif) as src:
                 b = src.bounds
-                # Create box for index (Project to 4326 if needed)
-                if src.crs and src.crs.to_string() != "EPSG:4326":
-                     from rasterio.warp import transform_bounds
-                     # transform_bounds(src_crs, dst_crs, left, bottom, right, top)
-                     left, bottom, right, top = transform_bounds(src.crs, "EPSG:4326", b.left, b.bottom, b.right, b.top)
-                     geom = box(left, bottom, right, top)
-                else:
-                     geom = box(b.left, b.bottom, b.right, b.top)
-                
-                tiles.append({
-                    "path": tif,
-                    "src": None, 
-                    "bounds": geom,
-                    "crs": src.crs
-                })
+                # Assume 4326 for bounds or simple box
+                geom = box(b.left, b.bottom, b.right, b.top)
+                tiles.append({"path": tif, "crs": src.crs})
                 tile_geoms.append(geom)
-
         except RasterioIOError:
             continue
-
+            
     if not tiles:
         detections_df = detections_df.copy()
         detections_df["surface_elev_m"] = pd.NA
         return detections_df
         
-    # Build Spatial Index
     tree = STRtree(tile_geoms)
-
-    def sample_height(lat: float, lon: float) -> Optional[float]:
-        pt = Point(lon, lat)
+    
+    # Group points by which tile they fall into to minimize File I/O
+    # 1. Query all points against tree
+    points = [Point(xy) for xy in zip(detections_df.lon, detections_df.lat)]
+    
+    # query returns [point_indices, tile_indices]
+    idx_pts, idx_tiles = tree.query(points, predicate="intersects")
+    
+    # Build Map: Tile Index -> List of (Point Index, Point Geom)
+    tile_to_points = {}
+    for pt_idx, tile_idx in zip(idx_pts, idx_tiles):
+        if tile_idx not in tile_to_points:
+            tile_to_points[tile_idx] = []
+        tile_to_points[tile_idx].append(pt_idx)
         
-        # Query Index
-        # query returns indices of geometries that intersect 'pt'
-        indices = tree.query(pt, predicate="intersects")
+    # Results container
+    surface_elevs = pd.Series(index=detections_df.index, dtype=float)
+    height_ag_vals = pd.Series(index=detections_df.index, dtype=float)
+    
+    # Iterate Tiles (Process Batch)
+    for tile_idx, pt_indices in tile_to_points.items():
+        tile = tiles[tile_idx]
+        tif_path = tile["path"]
         
-        for idx in indices:
-            tile = tiles[idx]
-            tif_path = tile["path"]
-            
-            # Now open the file
-            try:
-                with rasterio.open(tif_path) as src:
-                    transformer = None
-                    if src.crs and src.crs.to_string() != "EPSG:4326":
-                         transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+        try:
+            with rasterio.open(tif_path) as src:
+                # Prepare Transformer if needed
+                transformer = None
+                if src.crs and src.crs.to_string() != "EPSG:4326":
+                     transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+                
+                # Process all points for this tile
+                for pid in pt_indices:
+                    lat = detections_df.iloc[pid]["lat"]
+                    lon = detections_df.iloc[pid]["lon"]
                     
                     x, y = (lon, lat)
                     if transformer:
                         x, y = transformer.transform(lon, lat)
                         
+                    # Sample Center
                     try:
-                        row, col = src.index(x, y)
-                    except Exception:
-                        continue
-                        
-                    if row < 0 or col < 0 or row >= src.height or col >= src.width:
-                        continue
-                        
-                    value = src.read(1, window=Window(col, row, 1, 1))
-                    if value.size == 0:
-                        continue
-                        
-                    val = float(value[0, 0])
-                    if val > -1000: # Valid data
-                        return val
-            except Exception:
-                continue
-
-        return None
-
-    def calculate_local_hag(row) -> pd.Series:
-        lat, lon = row["lat"], row["lon"]
-        center_elev = sample_height(lat, lon)
-        
-        if center_elev is None:
-            return pd.Series([pd.NA, pd.NA], index=["surface_elev_m", "height_ag_m"])
-            
-        # Sample surroundings (approx 5 meters away)
-        # 1 deg lat ~= 111km -> 5m ~= 0.000045 deg
-        offset = 0.000045
-        surrounding_elevs = []
-        for dlat, dlon in [(-offset, 0), (offset, 0), (0, -offset), (0, offset)]:
-            elev = sample_height(lat + dlat, lon + dlon)
-            if elev is not None:
-                surrounding_elevs.append(elev)
-        
-        if not surrounding_elevs:
-             return pd.Series([center_elev, pd.NA], index=["surface_elev_m", "height_ag_m"])
-             
-        # Estimate ground as the median of surroundings to avoid noise
-        # Using min might overestimate height if one point is in a hole
-        # Using median is robust.
-        ground_elev = sorted(surrounding_elevs)[len(surrounding_elevs)//2]
-        height_ag = center_elev - ground_elev
-        
-        return pd.Series([center_elev, height_ag], index=["surface_elev_m", "height_ag_m"])
+                        r, c = src.index(x, y)
+                        val = src.read(1, window=Window(c, r, 1, 1))[0, 0]
+                        if val < -1000: center = None
+                        else: center = float(val)
+                    except: center = None
+                    
+                    if center is None: continue
+                    
+                    # Sample Surroundings (5m approx) to estimate ground
+                    offset = 0.000045 # Roughly 5m
+                    surrounds = []
+                    for dx, dy in [(-offset,0), (offset,0), (0,-offset), (0,offset)]:
+                        sx, sy = (lon+dx, lat+dy)
+                        if transformer:
+                            sx, sy = transformer.transform(sx, sy)
+                        try:
+                            sr, sc = src.index(sx, sy)
+                            sval = src.read(1, window=Window(sc, sr, 1, 1))[0,0]
+                            if sval > -1000: surrounds.append(float(sval))
+                        except: pass
+                    
+                    ground = sorted(surrounds)[len(surrounds)//2] if surrounds else center
+                    hag = center - ground
+                    
+                    surface_elevs.iloc[pid] = center
+                    height_ag_vals.iloc[pid] = hag
+                    
+        except Exception as e:
+            logger.warning(f"Error reading DSM tile {tif_path}: {e}")
+            continue
 
     detections_df = detections_df.copy()
-    # Apply calculation
-    cols = detections_df.apply(calculate_local_hag, axis=1)
-    detections_df["surface_elev_m"] = cols["surface_elev_m"]
-    detections_df["height_ag_m"] = cols["height_ag_m"]
-
-    # for tile in tiles:
-    #     tile["src"].close()
-
+    detections_df["surface_elev_m"] = surface_elevs
+    detections_df["height_ag_m"] = height_ag_vals
     return detections_df
 
 
@@ -315,6 +269,22 @@ def annotate_with_water(
     return pd.DataFrame(detections_gdf)
 
 
+from src.ingestion.connectors.openinframap import GridConnector
+
+def annotate_with_grid(detections_df: pd.DataFrame) -> pd.DataFrame:
+    """Append nearest-grid-backbone distance (meters)."""
+    grid = GridConnector()
+    if grid.gdf is None:
+        detections_df["grid_distance_m"] = pd.NA
+        return detections_df
+        
+    lat_lons = list(zip(detections_df["lat"], detections_df["lon"]))
+    dists = grid.get_nearest_powerline_dists(lat_lons)
+    
+    detections_df = detections_df.copy()
+    detections_df["grid_distance_m"] = dists
+    return detections_df
+
 def annotate_context_features(
     detections_df: pd.DataFrame,
     roads_path: Optional[Path] = None,
@@ -322,11 +292,12 @@ def annotate_context_features(
     water_path: Optional[Path] = None,
 ) -> pd.DataFrame:
     """
-    Enrich detection DataFrame with contextual features from roads, DSM, and water layers.
+    Enrich detection DataFrame with contextual features from roads, DSM, water, and Power Grid.
     """
     annotated = annotate_with_roads(detections_df, roads_path=roads_path)
     annotated = annotate_with_dsm(annotated, dsm_dir=dsm_dir)
     annotated = annotate_with_water(annotated, water_path=water_path)
+    annotated = annotate_with_grid(annotated)
     return annotated
 
 
@@ -356,8 +327,18 @@ def filter_implausible_detections(
         reasons: List[str] = []
 
         road_distance = row.get("road_distance_m")
-        if pd.notna(road_distance) and float(road_distance) > max_road_distance_m:
-            reasons.append(f"road_distance>{max_road_distance_m}m")
+        grid_distance = row.get("grid_distance_m")
+        
+        # LOGIC UPGRADE:
+        # A pole is valid if it is near a Road OR near a Utility Line.
+        # Previously, we REJECTED if ANY road_distance > max.
+        # Now, we only reject if BOTH are too far (or missing).
+        
+        is_near_road = pd.notna(road_distance) and float(road_distance) <= max_road_distance_m
+        is_near_grid = pd.notna(grid_distance) and float(grid_distance) <= max_road_distance_m # Using same threshold for now
+        
+        if not is_near_road and not is_near_grid:
+            reasons.append(f"too_far_from_infra (road={road_distance}, grid={grid_distance})")
 
         ndvi = row.get("ndvi")
         if pd.notna(ndvi) and not (lower_ndvi <= float(ndvi) <= upper_ndvi):
@@ -374,10 +355,11 @@ def filter_implausible_detections(
         if pd.notna(height_ag):
              hag_val = float(height_ag)
              # Utility poles are typically > 9m tall.
-             # Allow ample margin for DSM resolution/aliasing artifacts.
-             # If HAG is < 3m, it's almost certainly not a pole (likely ground/shadow).
-             if hag_val < 3.0:
-                 reasons.append(f"low_height_filtered_({hag_val:.1f}m)")
+             # However, standard DSM (1m or 1/3 arc-second) often fails to resolve thin poles,
+             # returning ground elevation (HAG ~ 0).
+             # Therefore, we CANNOT filter based on low HAG without massive False Negatives.
+             # We only use HAG to BOOST confidence, not to reject.
+             pass
 
         kept_row = row.copy()
         kept_row["filter_reasons"] = reasons
