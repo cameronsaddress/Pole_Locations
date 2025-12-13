@@ -377,12 +377,12 @@ class PoleDetector:
             candidates.append(Path(model_path))
 
         candidates.extend([
-            CHECKPOINTS_DIR / "yolo11l_full_run" / "weights" / "best.pt",
-            CHECKPOINTS_DIR / "yolo11l_pole_v1" / "weights" / "best.pt",
+            # CHECKPOINTS_DIR / "yolo11l_full_run" / "weights" / "best.pt",
+            # CHECKPOINTS_DIR / "yolo11l_pole_v1" / "weights" / "best.pt",
+            MODELS_DIR / "pole_detector_v7" / "weights" / "best.pt",
             MODELS_DIR / "pole_detector_real.pt",
             # Legacy checkpoints removed to enforce YOLO11 usage
             # MODELS_DIR / "yolov8l_v1" / "weights" / "best.pt",
-            # MODELS_DIR / "pole_detector_v7" / "weights" / "best.pt",
         ])
 
         for candidate in candidates:
