@@ -28,16 +28,21 @@ const getStaticMapUrl = (lat: number, lng: number, width: number, height: number
 // ----------------------------------------------------------------------------
 // FLOATING MARKER COMPONENT
 // ----------------------------------------------------------------------------
-const PoleMarker = ({ pole, onExpand, isExpanded }: {
+const PoleMarker = ({ pole, onExpand, isExpanded, onHoverState }: {
     pole: Asset,
     onExpand: () => void,
-    isExpanded: boolean
+    isExpanded: boolean,
+    onHoverState: (isHovering: boolean) => void
 }) => {
     // Fetch a centered 200x200 thumbnail
     const imageUrl = getStaticMapUrl(pole.lat, pole.lng, 200, 200)
 
     return (
-        <div className={`flex flex-col items-center origin-bottom animate-in zoom-in-50 duration-500 ${isExpanded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        <div
+            className={`flex flex-col items-center origin-bottom animate-in zoom-in-50 duration-500 ${isExpanded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+            onMouseEnter={() => onHoverState(true)}
+            onMouseLeave={() => onHoverState(false)}
+        >
 
             {/* 1. THE FLOATING CARD */}
             <div className="animate-in slide-in-from-bottom-10 fade-in duration-700 ease-out group perspective-1000 origin-bottom">
@@ -99,9 +104,17 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
     const mapContainer = useRef<HTMLDivElement>(null)
     const map = useRef<maplibregl.Map | null>(null)
 
+    // Timers for hover grace period (3s)
+    const removalTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+    const hoveredPoleIdRef = useRef<string | null>(null)
+
     // State for multiple active detections
     const [activePoles, setActivePoles] = useState<Asset[]>([])
     const [expandedPoleId, setExpandedPoleId] = useState<string | null>(null) // Track expanded
+
+    // Sync expandedPoleId to ref for usage in closures/timers
+    const expandedPoleIdRef = useRef<string | null>(null)
+    useEffect(() => { expandedPoleIdRef.current = expandedPoleId }, [expandedPoleId])
 
     // Zoom/Pan State for Modal Image
     const [imgState, setImgState] = useState({ scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0 })
@@ -275,24 +288,46 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
             })
 
             // ---------------------------------------------------------
-            // INTERACTION: CLICK TO INSPECT
+            // INTERACTION: HOVER TO INSPECT (3s GRACE)
             // ---------------------------------------------------------
-            map.current.on('mouseenter', 'assets-glow', () => {
-                if (map.current) map.current.getCanvas().style.cursor = 'pointer'
-            })
-            map.current.on('mouseleave', 'assets-glow', () => {
-                if (map.current) map.current.getCanvas().style.cursor = ''
-            })
+            const scheduleRemoval = (id: string) => {
+                if (removalTimers.current.has(id)) clearTimeout(removalTimers.current.get(id)!)
 
-            map.current.on('click', 'assets-glow', (e) => {
+                const timer = setTimeout(() => {
+                    // CRITICAL: Do not remove if this pole is currently expanded!
+                    if (expandedPoleIdRef.current === id) {
+                        removalTimers.current.delete(id)
+                        return
+                    }
+
+                    setActivePoles(prev => prev.filter(p => p.id !== id))
+                    removalTimers.current.delete(id)
+                }, 3000) // 3 Seconds Duration
+
+                removalTimers.current.set(id, timer)
+            }
+
+            const cancelRemoval = (id: string) => {
+                if (removalTimers.current.has(id)) {
+                    clearTimeout(removalTimers.current.get(id)!)
+                    removalTimers.current.delete(id)
+                }
+            }
+
+            map.current.on('mouseenter', 'assets-glow', (e) => {
+                map.current!.getCanvas().style.cursor = 'pointer'
+
                 const feature = e.features?.[0]
                 if (!feature) return
-
                 const props = feature.properties
+                const id = props?.id
                 // @ts-ignore
                 const [lng, lat] = feature.geometry.coordinates
 
-                const clickedPole: Asset = {
+                hoveredPoleIdRef.current = id
+                cancelRemoval(id)
+
+                const pole: Asset = {
                     id: props?.id,
                     lat: lat,
                     lng: lng,
@@ -301,14 +336,19 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                 }
 
                 setActivePoles(prev => {
-                    // If already active, don't duplicate
-                    if (prev.find(p => p.id === clickedPole.id)) return prev
-
-                    // Add new, cycle out oldest if > 3
-                    const temp = [...prev, clickedPole]
+                    if (prev.find(p => p.id === id)) return prev
+                    const temp = [...prev, pole]
                     if (temp.length > 3) temp.shift()
                     return temp
                 })
+            })
+
+            map.current.on('mouseleave', 'assets-glow', () => {
+                map.current!.getCanvas().style.cursor = ''
+                const id = hoveredPoleIdRef.current
+                if (id) {
+                    scheduleRemoval(id)
+                }
             })
 
             // Context Layers
@@ -353,7 +393,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
             map.current.once('moveend', () => {
                 // GOAL: "Halfway between ground and sky" = 45 degrees
                 // Height: "1000 ft building" ~ Zoom 16.5 -> Reduced to 15.5 for stability
-                
+
                 // ENABLE TERRAIN NOW (Safe after fly-in)
                 map.current?.setTerrain({ source: 'terrain-source', exaggeration: 1.5 })
 
@@ -527,6 +567,26 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
             // RENDER (Update props including expanded state)
             const { root } = markersRef.current.get(pole.id)!
+
+            // Helper to manage timers from React component interaction
+            const handleHoverState = (isHovering: boolean) => {
+                if (isHovering) {
+                    // Cancel removal if user enters card
+                    if (removalTimers.current.has(pole.id)) {
+                        clearTimeout(removalTimers.current.get(pole.id)!)
+                        removalTimers.current.delete(pole.id)
+                    }
+                } else {
+                    // Schedule removal if user leaves card (and map dot is not hovered)
+                    // We assume leaving card means leaving interaction zone.
+                    const timer = setTimeout(() => {
+                        setActivePoles(prev => prev.filter(p => p.id !== pole.id))
+                        removalTimers.current.delete(pole.id)
+                    }, 3000)
+                    removalTimers.current.set(pole.id, timer)
+                }
+            }
+
             root.render(
                 <PoleMarker
                     pole={pole}
@@ -535,6 +595,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                         setExpandedPoleId(pole.id)
                         // Rotation CONTINUES during expand (per user request)
                     }}
+                    onHoverState={handleHoverState}
                 />
             )
         })
