@@ -1,0 +1,15 @@
+nohup: ignoring input
+INFO:MapillaryIngest:Starting Mass Mapillary Ingest for PA Pilot Counties...
+INFO:MapillaryIngest:Fetching Dauphin County...
+ERROR:MapillaryIngest:API Error: {"error":{"message":"Param limit must be a number less than or equal to 5000","type":"MLYApiException","code":100,"fbtrace_id":"AgMKaflFntBMB_13x3faMcK"}}
+INFO:MapillaryIngest:  Found 0 images.
+INFO:MapillaryIngest:Committed 0 new street view records.
+INFO:MapillaryIngest:Fetching York County...
+ERROR:MapillaryIngest:API Error: {"error":{"message":"Param limit must be a number less than or equal to 5000","type":"MLYApiException","code":100,"fbtrace_id":"AklpLOA0C8FxVh2n0fXHkLP"}}
+INFO:MapillaryIngest:  Found 0 images.
+INFO:MapillaryIngest:Committed 0 new street view records.
+INFO:MapillaryIngest:Fetching Cumberland County...
+ERROR:MapillaryIngest:API Error: {"error":{"message":"Param limit must be a number less than or equal to 5000","type":"MLYApiException","code":100,"fbtrace_id":"AXw83USw28fHvGanm86roJR"}}
+INFO:MapillaryIngest:  Found 0 images.
+INFO:MapillaryIngest:Committed 0 new street view records.
+INFO:MapillaryIngest:Done. Total Network Size: 0 images.

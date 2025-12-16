@@ -36,7 +36,7 @@ def fetch_images_in_bbox(bbox: List[float], limit=2000):
         "access_token": MAPILLARY_TOKEN,
         "fields": "id,geometry,compass_angle,captured_at,sequence",
         "bbox": f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}",
-        "limit": limit
+        "limit": 2000 # Max allowed by API per page
     }
     
     images = []
@@ -56,7 +56,7 @@ def fetch_images_in_bbox(bbox: List[float], limit=2000):
         # Check next page logic if needed, but for "all available" we might need proper paging
         # Mapillary paging uses 'paging.next' link
         next_link = data.get('paging', {}).get('next')
-        if next_link and len(images) < 10000: # Safety cap
+        if next_link and len(images) < 2000000: # Cap at 2M
             url = next_link
             params = {} # Params are in the link
         else:
@@ -97,16 +97,36 @@ def ingest_metadata(images: List[Dict]):
         session.commit()
         logger.info(f"Committed {added} new street view records.")
 
+def subdivide_bbox(bbox, step=0.08): # Slightly less than 0.1 to be safe
+    """Generator to yield smaller bboxes from a large one."""
+    min_x, min_y, max_x, max_y = bbox
+    
+    curr_x = min_x
+    while curr_x < max_x:
+        curr_y = min_y
+        while curr_y < max_y:
+            next_x = min(curr_x + step, max_x)
+            next_y = min(curr_y + step, max_y)
+            yield [curr_x, curr_y, next_x, next_y]
+            curr_y += step
+        curr_x += step
+
 def main():
     logger.info("Starting Mass Mapillary Ingest for PA Pilot Counties...")
     
     total = 0
     for name, bbox in COUNTIES.items():
-        logger.info(f"Fetching {name} County...")
-        imgs = fetch_images_in_bbox(bbox, limit=5000) # Fetch 5000 per county for pilot
-        logger.info(f"  Found {len(imgs)} images.")
-        ingest_metadata(imgs)
-        total += len(imgs)
+        logger.info(f"Fetching {name} County (Subdividing Grid)...")
+        
+        county_total = 0
+        for sub_bbox in subdivide_bbox(bbox):
+             imgs = fetch_images_in_bbox(sub_bbox, limit=2000000)
+             if imgs:
+                 ingest_metadata(imgs)
+                 county_total += len(imgs)
+                 
+        logger.info(f"  Processed {name}: {county_total} total images.")
+        total += county_total
         
     logger.info(f"Done. Total Network Size: {total} images.")
 

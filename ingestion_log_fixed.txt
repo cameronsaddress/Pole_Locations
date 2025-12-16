@@ -1,0 +1,15 @@
+nohup: ignoring input
+INFO:MapillaryIngest:Starting Mass Mapillary Ingest for PA Pilot Counties...
+INFO:MapillaryIngest:Fetching Dauphin County...
+ERROR:MapillaryIngest:API Error: {"error":{"message":"Bounding box area is too large. Maximum allowed area is 0.010 square degrees, but got 0.250 square degrees.","type":"MLYApiException","code":100,"fbtrace_id":"AuBVzR2ReMKHoMhVn1ruR8R"}}
+INFO:MapillaryIngest:  Found 0 images.
+INFO:MapillaryIngest:Committed 0 new street view records.
+INFO:MapillaryIngest:Fetching York County...
+ERROR:MapillaryIngest:API Error: {"error":{"message":"Bounding box area is too large. Maximum allowed area is 0.010 square degrees, but got 0.400 square degrees.","type":"MLYApiException","code":100,"fbtrace_id":"AgB0krx-fZfM2gs50O58syg"}}
+INFO:MapillaryIngest:  Found 0 images.
+INFO:MapillaryIngest:Committed 0 new street view records.
+INFO:MapillaryIngest:Fetching Cumberland County...
+ERROR:MapillaryIngest:API Error: {"error":{"message":"Bounding box area is too large. Maximum allowed area is 0.010 square degrees, but got 0.240 square degrees.","type":"MLYApiException","code":100,"fbtrace_id":"A3j3p71ctStLqD74YEAbykl"}}
+INFO:MapillaryIngest:  Found 0 images.
+INFO:MapillaryIngest:Committed 0 new street view records.
+INFO:MapillaryIngest:Done. Total Network Size: 0 images.

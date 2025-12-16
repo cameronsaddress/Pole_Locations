@@ -269,7 +269,8 @@ We moved from a generic single model to a specialized **Expert Ensemble**:
 
 ### 3. Sensor Fusion & Correlation (Live)
 The pipeline now features a fully active Correlation Engine:
-*   **Metadata Ingestion**: `src/ingestion/ingest_mapillary_metadata.py` populates the `street_view_images` PostGIS table with millions of car locations + camera headings.
+*   **Metadata Ingestion**: `src/ingestion/ingest_mapillary_metadata.py` populates the `street_view_images` PostGIS table.
+    *   **Logic**: Uses a recursive Grid Subdivision strategy to bypass API limits and fetch **Millions** of ego-motion records for the pilot counties.
 *   **Ray Casting**: When the AI detects a pole from space, `SensorFusion` checks for nearby street view images.
 *   **Verification**: If a car's camera vector intersects the satellite point -> **Confirmed Golden Record**.
 *   **String of Pearls**: Algorithms infer missing poles based on 30-50m network spacing topology.
