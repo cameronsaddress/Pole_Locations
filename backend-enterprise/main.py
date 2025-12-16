@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from routers import ops, training, work_orders
+from routers import ops, training, work_orders, pipeline
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(ops.router)
 app.include_router(training.router, prefix="/api/v2/training")
 app.include_router(work_orders.router)
+app.include_router(pipeline.router)
 
 # --- WEBSOCKETS ---
 @app.websocket("/ws/training")
@@ -101,11 +102,6 @@ async def training_endpoint(websocket: WebSocket):
                 await websocket.send_json(event)
             
             await asyncio.sleep(0.5) # Poll frequency
-            
-    except WebSocketDisconnect:
-        logger.info("Training Dashboard disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket Error: {e}")
             
     except WebSocketDisconnect:
         logger.info("Training Dashboard disconnected")

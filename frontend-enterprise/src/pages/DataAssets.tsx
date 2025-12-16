@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Download, Filter, MoreHorizontal, Search } from "lucide-react"
+import { Download, Filter, MoreHorizontal, Search, Zap, Loader2, CheckCircle } from "lucide-react"
+import { Progress } from "@/components/ui/progress"
 
 interface Asset {
     id: string
@@ -22,17 +23,62 @@ interface Asset {
     detected_at: string
 }
 
+interface RepairJob {
+    status: string
+    job_id: number
+    meta: {
+        total_targets: number
+        processed: number
+        fixed: number
+    }
+}
+
 export default function DataAssets() {
     const [data, setData] = useState<Asset[]>([])
     const [searchTerm, setSearchTerm] = useState("")
+    const [repairJob, setRepairJob] = useState<RepairJob | null>(null)
 
-    useEffect(() => {
-        const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+    const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+
+    // Load Assets
+    const loadAssets = () => {
         fetch(`${apiHost}/api/v2/assets`)
             .then(res => res.json())
             .then(data => setData(data))
             .catch(err => console.error("Failed to load assets:", err))
+    }
+
+    useEffect(() => {
+        loadAssets()
+
+        // Poll Job Status
+        const interval = setInterval(() => {
+            fetch(`${apiHost}/api/v2/ops/jobs/repair/status`)
+                .then(res => res.json())
+                .then(job => {
+                    if (job.status !== 'idle') {
+                        setRepairJob(job)
+                        // If job just finished, reload assets
+                        if (job.status === 'Completed' && repairJob?.status !== 'Completed') {
+                            loadAssets()
+                        }
+                    } else {
+                        setRepairJob(null)
+                    }
+                })
+                .catch(console.error)
+        }, 3000)
+        return () => clearInterval(interval)
     }, [])
+
+    const triggerRepair = () => {
+        fetch(`${apiHost}/api/v2/ops/jobs/repair`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                // Force an immediate poll or set local state
+                setRepairJob({ status: 'Pending', job_id: data.job_id, meta: { total_targets: 0, processed: 0, fixed: 0 } })
+            })
+    }
 
     const filteredData = data.filter(item =>
         item.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -47,6 +93,39 @@ export default function DataAssets() {
                     <p className="text-muted-foreground">Manage and audit detected utility poles (fused with FAA/PASDA/Lidar)</p>
                 </div>
                 <div className="flex gap-2">
+                    {repairJob && repairJob.status !== 'idle' ? (
+                        <Card className="w-[300px] border-cyan-500/50 bg-black/40 backdrop-blur">
+                            <CardContent className="p-3 flex items-center gap-3">
+                                {repairJob.status === 'Running' || repairJob.status === 'Pending' ? (
+                                    <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
+                                ) : (
+                                    <CheckCircle className="w-5 h-5 text-green-400" />
+                                )}
+                                <div className="flex-1">
+                                    <div className="flex justify-between text-xs mb-1 font-mono text-cyan-200">
+                                        <span>AI NETWORK REPAIR</span>
+                                        <span>{repairJob.status.toUpperCase()}</span>
+                                    </div>
+                                    <div className="w-full bg-gray-700 h-1.5 rounded-full overflow-hidden">
+                                        <div
+                                            className="bg-cyan-500 h-full transition-all duration-500"
+                                            style={{ width: `${(repairJob.meta.processed / Math.max(1, repairJob.meta.total_targets)) * 100}%` }}
+                                        />
+                                    </div>
+                                    <div className="text-[10px] text-gray-400 mt-1 flex justify-between">
+                                        <span>Processed: {repairJob.meta.processed}/{repairJob.meta.total_targets}</span>
+                                        <span className="text-green-400">Fixed: {repairJob.meta.fixed}</span>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ) : (
+                        <Button onClick={triggerRepair} className="bg-cyan-600 hover:bg-cyan-500 text-white border border-cyan-400/30 shadow-lg shadow-cyan-500/20">
+                            <Zap className="mr-2 h-4 w-4" />
+                            Run AI Network Repair
+                        </Button>
+                    )}
+
                     <Button variant="outline">
                         <Download className="mr-2 h-4 w-4" />
                         Export CSV
@@ -97,8 +176,9 @@ export default function DataAssets() {
                                     <TableCell>
                                         <Badge variant={
                                             item.status === 'Verified' ? 'default' :
-                                                item.status === 'Review' ? 'secondary' : 'destructive'
-                                        }>
+                                                item.status === 'Review' ? 'secondary' :
+                                                    item.status === 'Missing' ? 'outline' : 'destructive'
+                                        } className={item.status === 'Missing' ? 'border-amber-500 text-amber-500' : ''}>
                                             {item.status}
                                         </Badge>
                                     </TableCell>
@@ -106,7 +186,7 @@ export default function DataAssets() {
                                         <div className="flex items-center gap-2">
                                             <div className="h-2 w-16 bg-muted rounded-full overflow-hidden">
                                                 <div
-                                                    className="h-full bg-green-500"
+                                                    className={`h-full ${item.status === 'Missing' ? 'bg-amber-500' : 'bg-green-500'}`}
                                                     style={{ width: `${item.confidence * 100}%` }}
                                                 />
                                             </div>
@@ -131,3 +211,4 @@ export default function DataAssets() {
         </div>
     )
 }
+

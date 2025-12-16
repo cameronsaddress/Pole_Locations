@@ -16,7 +16,7 @@ from datetime import datetime
 # DB Imports
 from sqlmodel import Session, select
 from database import get_session
-from models import Pole
+from models import Pole, Job
 from geoalchemy2.shape import to_shape
 
 router = APIRouter(prefix="/api/v2")
@@ -33,6 +33,8 @@ class Asset(BaseModel):
     last_audit: Optional[str] = None
     financial_impact: float = 0.0
     height_m: Optional[float] = None
+    tags: Optional[dict] = {}
+    mapillary_key: Optional[str] = None
 
 class OpsMetrics(BaseModel):
     total_assets: int
@@ -55,6 +57,10 @@ def model_to_asset(pole: Pole) -> Asset:
     if pole.height_ag_m and pole.height_ag_m > 1.0:
         issues.append(f"Height: {pole.height_ag_m:.1f}m")
 
+    # Extract Mapillary Key if present
+    # Prioritize 'confirmed_by_image' tag
+    m_key = pole.tags.get('confirmed_by_image') if pole.tags else None
+
     return Asset(
         id=pole.pole_id, # Use External ID for display
         lat=pt.y,
@@ -66,7 +72,9 @@ def model_to_asset(pole: Pole) -> Asset:
         health_score=0.5 if pole.status == "Critical" else 1.0,
         financial_impact=pole.financial_impact,
         last_audit=pole.last_verified_at.isoformat(),
-        height_m=pole.height_ag_m
+        height_m=pole.height_ag_m,
+        tags=pole.tags or {},
+        mapillary_key=m_key
     )
 
 @router.get("/assets")
@@ -164,3 +172,49 @@ async def get_audit_log(limit: int = 20, db: Session = Depends(get_session)):
     ).all()
     
     return [model_to_asset(p) for p in results]
+
+# --- REPAIR JOBS ---
+
+@router.post("/ops/jobs/repair")
+async def trigger_repair_job(db: Session = Depends(get_session)):
+    """Triggers an asynchronous AI Repair Job for 'Missing' poles."""
+    # 1. Create Job Record
+    new_job = Job(
+        name="AI_NETWORK_REPAIR",
+        status="Pending",
+        meta_data={"total_targets": 0, "processed": 0, "fixed": 0}
+    )
+    db.add(new_job)
+    db.commit()
+    db.refresh(new_job)
+    
+    # 2. Spawn Subprocess (Fire and Forget)
+    # We execute inside the GPU container to access YOLO environment and correct paths
+    import subprocess
+    subprocess.Popen([
+        "docker", "exec", "polevision-gpu",
+        "python3", "/workspace/src/training/ai_repair_worker.py", str(new_job.id)
+    ])
+    
+    return {"status": "started", "job_id": new_job.id}
+
+@router.get("/ops/jobs/repair/status")
+async def get_repair_status(db: Session = Depends(get_session)):
+    """Get the status of the latest repair job."""
+    from sqlalchemy import desc
+    job = db.exec(
+        select(Job)
+        .where(Job.name == "AI_NETWORK_REPAIR")
+        .order_by(desc(Job.created_at))
+        .limit(1)
+    ).first()
+    
+    if not job:
+        return {"status": "idle", "progress": 0, "meta": {}}
+        
+    return {
+        "status": job.status,
+        "job_id": job.id,
+        "meta": job.meta_data,
+        "created_at": job.created_at
+    }

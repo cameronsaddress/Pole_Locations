@@ -1,0 +1,327 @@
+import { useState, useEffect, useRef } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+    Activity,
+    Terminal,
+    Play,
+    CheckCircle,
+    Layers,
+    FileText,
+    Zap,
+    Cpu,
+    Database,
+    Server
+} from 'lucide-react'
+import { RegionPickerModal } from "@/components/RegionPickerModal"
+
+// Types
+interface Dataset {
+    id: string
+    name: string
+    status: 'available' | 'supported' | 'mining' | 'missing'
+}
+
+interface DatasetMap {
+    [state: string]: Dataset[]
+}
+
+interface LogMessage {
+    timestamp: string
+    message: string
+    type: 'info' | 'error' | 'success'
+}
+
+export default function Pipeline() {
+    const [datasets, setDatasets] = useState<DatasetMap>({})
+
+    // Selections
+    const [selectedCounties, setSelectedCounties] = useState<string[]>(['dauphin_pa', 'cumberland_pa', 'york_pa'])
+    const [miningCounties, setMiningCounties] = useState<string[]>([])
+
+    // Stage States
+    const [activeStage, setActiveStage] = useState<string | null>(null)
+    const [logs, setLogs] = useState<LogMessage[]>([])
+    const logsEndRef = useRef<HTMLDivElement>(null)
+
+    // Polling for logs
+    useEffect(() => {
+        const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+
+        // Load Datasets
+        const fetchDatasets = () => {
+            fetch(`${apiHost}/api/v2/pipeline/datasets`)
+                .then(res => res.json())
+                .then(data => setDatasets(data))
+                .catch(err => console.error("Failed to load datasets", err))
+        }
+
+        // Initial Fetch
+        fetchDatasets()
+
+        // Log Poller
+        const interval = setInterval(() => {
+            if (activeStage) {
+                // Also refresh datasets periodically to check for mining completion
+                fetchDatasets()
+
+                fetch(`${apiHost}/api/v2/pipeline/logs?lines=50`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.logs) {
+                            const lines = data.logs.split('\n').filter(Boolean)
+                            const newLogs = lines.map((l: string) => ({
+                                timestamp: new Date().toLocaleTimeString(),
+                                message: l,
+                                type: l.toLowerCase().includes('error') ? 'error' : 'info'
+                            }))
+                            setLogs(newLogs)
+                        }
+                    })
+            }
+        }, 1000)
+
+        return () => clearInterval(interval)
+    }, [activeStage])
+
+    // Auto-scroll logs
+    useEffect(() => {
+        logsEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }, [logs])
+
+    const runJob = async (jobType: string, params: any = {}) => {
+        setActiveStage(jobType)
+        setLogs(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), message: `Starting Job: ${jobType}...`, type: 'info' }])
+
+        const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+        try {
+            await fetch(`${apiHost}/api/v2/pipeline/run/${jobType}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ params })
+            })
+        } catch (e) {
+            console.error(e)
+            setLogs(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), message: "Failed to trigger job", type: 'error' }])
+            setActiveStage(null)
+        }
+    }
+
+    return (
+        <div className="space-y-6 pb-20">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="text-3xl font-bold tracking-tight text-white">Enterprise Pipeline Operations</h2>
+                    <p className="text-muted-foreground">Orchestrate Data Ingestion, Model Training, and Unified Fusion</p>
+                </div>
+                <Badge variant="outline" className={`text-lg px-4 py-1 ${activeStage ? 'border-cyan-500 text-cyan-500 animate-pulse' : 'border-gray-700 text-gray-500'}`}>
+                    <Activity className="mr-2 h-4 w-4" />
+                    {activeStage ? `PIPELINE ACTIVE: ${activeStage.toUpperCase()}` : "SYSTEM IDLE"}
+                </Badge>
+            </div>
+
+            <div className="grid grid-cols-12 gap-6">
+
+                {/* LEFT COLUMN: CONTROL STACK */}
+                <div className="col-span-8 space-y-6">
+
+                    {/* 1. STAGE: MINING */}
+                    <Card className={`border-l-4 ${activeStage === 'mining' ? 'border-l-pink-500 bg-pink-950/10' : 'border-l-gray-700 bg-card/50'}`}>
+                        <CardContent className="p-4">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex gap-4 items-center">
+                                    <div className="p-3 rounded-full bg-pink-900/30 text-pink-400">
+                                        <Database className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-lg text-white">Stage 1: Data Mining & Ingestion</h3>
+                                        <p className="text-sm text-gray-400">Mine Satellite/Street Images → DINO Segmentation → Generate Bounding Boxes.</p>
+                                    </div>
+                                </div>
+                                <Button
+                                    disabled={!!activeStage || miningCounties.length === 0}
+                                    onClick={() => runJob('mining', { targets: miningCounties })}
+                                    variant="secondary"
+                                    className="bg-pink-900/40 text-pink-300 hover:bg-pink-900/60"
+                                >
+                                    <Play className="w-4 h-4 mr-2" /> Start Mining
+                                </Button>
+                            </div>
+
+                            {/* Mining Targets Picker */}
+                            <div className="bg-black/20 p-3 rounded border border-gray-800 flex items-center justify-between">
+                                <RegionPickerModal
+                                    mode="mining"
+                                    datasets={datasets}
+                                    selected={miningCounties}
+                                    onSelectionChange={setMiningCounties}
+                                    triggerText={miningCounties.length ? `${miningCounties.length} Regions Queued` : "Select Regions to Mine..."}
+                                    disabled={!!activeStage}
+                                />
+                                <div className="text-xs text-gray-500 font-mono">
+                                    {miningCounties.length > 0 ? "Targeting: " + miningCounties.join(", ") : "No targets queued."}
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* 2. DATA SELECTION */}
+                    <Card className="border-l-4 border-l-cyan-500 bg-card/50">
+                        <CardContent className="p-4">
+                            <div className="flex gap-4 items-center mb-4">
+                                <div className="p-3 rounded-full bg-cyan-900/30 text-cyan-400">
+                                    <FileText className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-lg text-white">Stage 2: Target Datasets (Active)</h3>
+                                    <p className="text-sm text-gray-400">Select processed datasets to be used in downstream Training and Inference.</p>
+                                </div>
+                            </div>
+
+                            {/* Active Targets Picker */}
+                            <div className="bg-black/20 p-3 rounded border border-gray-800 flex items-center justify-between">
+                                <RegionPickerModal
+                                    mode="targets"
+                                    datasets={datasets}
+                                    selected={selectedCounties}
+                                    onSelectionChange={setSelectedCounties}
+                                    triggerText={selectedCounties.length ? `${selectedCounties.length} Datasets Active` : "Select Active Datasets..."}
+                                    disabled={!!activeStage}
+                                />
+                                <div className="text-xs text-gray-500 font-mono">
+                                    {selectedCounties.length > 0 ? "Active: " + selectedCounties.join(", ") : "No datasets active."}
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* 3. STAGE: INTEGRITY */}
+                    <Card className={`border-l-4 ${activeStage === 'integrity' ? 'border-l-cyan-500 bg-cyan-950/10' : 'border-l-gray-700 bg-card/50'}`}>
+                        <CardContent className="p-4 flex items-center justify-between">
+                            <div className="flex gap-4 items-center">
+                                <div className="p-3 rounded-full bg-blue-900/30 text-blue-400">
+                                    <Layers className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-lg text-white">Stage 3: Data Integrity & Repair</h3>
+                                    <p className="text-sm text-gray-400">Scan GeoTIFF headers, verify grid alignment, repair manifests.</p>
+                                </div>
+                            </div>
+                            <Button disabled={!!activeStage} onClick={() => runJob('integrity')} variant="secondary">
+                                <Play className="w-4 h-4 mr-2" /> Run Audit
+                            </Button>
+                        </CardContent>
+                    </Card>
+
+                    {/* 4. STAGE: TRAINING */}
+                    <Card className={`border-l-4 ${activeStage?.includes('train') ? 'border-l-purple-500 bg-purple-950/10' : 'border-l-gray-700 bg-card/50'}`}>
+                        <CardContent className="p-4">
+                            <div className="flex gap-4 items-center mb-4">
+                                <div className="p-3 rounded-full bg-purple-900/30 text-purple-400">
+                                    <Cpu className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-lg text-white">Stage 4: Dual-Expert Training</h3>
+                                    <p className="text-sm text-gray-400">Fine-tune YOLO11l specialists on the latest labeled data.</p>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 pl-16">
+                                <div className="bg-black/40 p-3 rounded border border-gray-800 flex justify-between items-center">
+                                    <span className="text-sm font-mono text-gray-300">Satellite Expert (Top-Down)</span>
+                                    <Button size="sm" disabled={!!activeStage} onClick={() => runJob('train_satellite', { epochs: 50 })} className="h-7 text-xs bg-purple-900 hover:bg-purple-800">
+                                        Train (50 ep)
+                                    </Button>
+                                </div>
+                                <div className="bg-black/40 p-3 rounded border border-gray-800 flex justify-between items-center">
+                                    <span className="text-sm font-mono text-gray-300">Street Expert (Ego-Centric)</span>
+                                    <Button size="sm" disabled={!!activeStage} onClick={() => runJob('train_street', { epochs: 50 })} className="h-7 text-xs bg-purple-900 hover:bg-purple-800">
+                                        Train (50 ep)
+                                    </Button>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* 5. STAGE: INFERENCE */}
+                    <Card className={`border-l-4 ${activeStage === 'inference' ? 'border-l-green-500 bg-green-950/10' : 'border-l-gray-700 bg-card/50'}`}>
+                        <CardContent className="p-4 flex items-center justify-between">
+                            <div className="flex gap-4 items-center">
+                                <div className="p-3 rounded-full bg-green-900/30 text-green-400">
+                                    <Zap className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-lg text-white">Stage 5: Unified Detection & Fusion</h3>
+                                    <p className="text-sm text-gray-400">Detect → Enrich (Lidar/Roads) → Fuse → PostGIS Golden Record.</p>
+                                    {selectedCounties.length > 0 && (
+                                        <Badge variant="outline" className="mt-1 border-green-500/30 text-green-400">
+                                            Targets: {selectedCounties.join(', ')}
+                                        </Badge>
+                                    )}
+                                </div>
+                            </div>
+                            <Button
+                                disabled={!!activeStage || selectedCounties.length === 0}
+                                onClick={() => runJob('inference', { targets: selectedCounties })}
+                                className="bg-green-600 hover:bg-green-500"
+                            >
+                                <Play className="w-4 h-4 mr-2" /> Start Pipeline
+                            </Button>
+                        </CardContent>
+                    </Card>
+
+                    {/* MASTER ACTION */}
+                    <Card className={`border-2 border-dashed ${activeStage === 'full_pipeline' ? 'border-cyan-500 bg-cyan-950/10' : 'border-gray-700 bg-black/20'}`}>
+                        <CardContent className="p-4 flex items-center justify-between">
+                            <div className="flex gap-4 items-center">
+                                <div className="p-3 rounded-full bg-white/10 text-white">
+                                    <Activity className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-lg text-white">Full Enterprise Run</h3>
+                                    <p className="text-sm text-gray-400">Execute End-to-End: Integrity → Train → Detect → Fuse.</p>
+                                </div>
+                            </div>
+                            <Button
+                                disabled={!!activeStage}
+                                onClick={() => runJob('full_pipeline')}
+                                className="bg-white text-black hover:bg-gray-200 font-bold"
+                            >
+                                <Play className="w-4 h-4 mr-2" /> RUN ALL
+                            </Button>
+                        </CardContent>
+                    </Card>
+
+                </div>
+
+                {/* RIGHT COLUMN: LOGS */}
+                <div className="col-span-4">
+                    <Card className="h-full bg-black border-primary/20 flex flex-col">
+                        <CardHeader className="py-3 border-b border-primary/10 bg-muted/10">
+                            <CardTitle className="text-sm flex items-center text-green-500 font-mono">
+                                <Terminal className="mr-2 h-4 w-4" /> Live Console Output
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0 flex-1 relative">
+                            <div className="absolute inset-0 overflow-y-auto p-4 font-mono text-xs space-y-1">
+                                {logs.length === 0 && (
+                                    <span className="text-gray-600 italic">Waiting for process output...</span>
+                                )}
+                                {logs.map((log, i) => (
+                                    <div key={i} className="break-all border-l-2 pl-2 border-gray-800 hover:bg-white/5 transition-colors">
+                                        <span className="text-gray-600 text-[10px] block mb-0.5">{log.timestamp}</span>
+                                        <span className={log.type === 'error' ? "text-red-400" : "text-gray-300"}>
+                                            {log.message}
+                                        </span>
+                                    </div>
+                                ))}
+                                <div ref={logsEndRef} />
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            </div>
+        </div>
+    )
+}

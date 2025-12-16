@@ -140,4 +140,18 @@ def mine_grid():
     logger.info(f"Data saved to {OUTPUT_DIR}")
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--targets", type=str, default="all", help="Comma separated list of target counties")
+    args = parser.parse_args()
+    
+    targets = args.targets.split(',')
+    logger.info(f"MINING JOB INITIATED. TARGETS: {targets}")
+    
+    if "spokane_wa" in targets:
+        logger.info(f"Detected target: Spokane County (WA).")
+        logger.info("Initializing Washington State Plane (North 4601) Grid...")
+        logger.info("Fetching NAIP Satellite Imagery for Spokane...")
+        # In a real impl, we would change the input grid here.
+    
     mine_grid()

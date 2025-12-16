@@ -89,6 +89,22 @@ docker exec -e PYTHONPATH=/workspace:/workspace/backend-enterprise \
             polevision-gpu python /workspace/run_full_enterprise_pipeline.py
 ```
 
+### 4️⃣ AI Network Repair & Visual Fusion (New)
+**Automated Gap Analysis & Repair**:
+- **Problem**: The "Pearl Stringer" identifies missing poles based on spacing logic.
+- **Solution**: The **AI Repair Worker** (`src/training/ai_repair_worker.py`) is a background job that:
+    1.  Targeting "Missing" poles.
+    2.  Locates the parent aerial tile.
+    3.  Performs a "Deep Scan" using the Satellite Expert with lowered thresholds.
+    4.  Updates the database with "Verified" status if confirmed.
+
+**UI Integration**:
+- **Live Surveillance**: The Map interface now features a **Tabbed Intelligence Card**.
+    - **Tab 1: Mapillary**: Shows the actual street-level photo that confirmed the pole (via Sensor Fusion).
+    - **Tab 2: Satellite**: High-res aerial view.
+    - **Tab 3: Google**: Fallback to Google Street View.
+- **Ops Dashboard**: New "AI Network Repair" widget allows operators to trigger and monitor re-scan jobs in real-time.
+
 **What this does:**
 1.  **Train (Optional)**: Trains YOLO11l on the latest dataset.
 2.  **Ingest**: Scans `/data/imagery` for new tiles.

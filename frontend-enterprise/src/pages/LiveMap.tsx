@@ -3,7 +3,8 @@ import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, Geo
 // import MarkerClusterGroup from 'react-leaflet-cluster'
 import L, { DomEvent } from 'leaflet'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Activity, Layers, Filter } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Activity, Layers, Filter, Maximize2, ExternalLink } from "lucide-react"
 import 'leaflet/dist/leaflet.css'
 import { Button } from '@/components/ui/button'
 
@@ -14,6 +15,8 @@ interface Asset {
    status: string
    confidence: number
    detected_at: string
+   tags?: any
+   mapillary_key?: string
 }
 
 // Helper to convert Lat/Lng to Tile Coordinates (Zoom 18 for high detail)
@@ -25,6 +28,42 @@ const getTileUrl = (lat: number, lng: number, zoom: number) => {
    // Using Esri World Imagery for "Real Satellite" view
    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
 };
+
+// Component to fetch and display Mapillary Image
+const MapillaryImage = ({ imageKey }: { imageKey: string }) => {
+    const [imageUrl, setImageUrl] = useState<string | null>(null)
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        if (!imageKey) return
+        
+        const token = import.meta.env.VITE_MAPILLARY_TOKEN
+        if (!token) return
+
+        fetch(`https://graph.mapillary.com/${imageKey}?access_token=${token}&fields=thumb_2048_url`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.thumb_2048_url) setImageUrl(data.thumb_2048_url)
+                setLoading(false)
+            })
+            .catch(err => {
+                console.error("Mapillary fetch error:", err)
+                setLoading(false)
+            })
+    }, [imageKey])
+
+    if (loading) return <div className="h-48 flex items-center justify-center text-cyan-500 animate-pulse">Loading Mapillary...</div>
+    if (!imageUrl) return <div className="h-48 flex items-center justify-center text-gray-500">Image Unavailable</div>
+
+    return (
+        <div className="relative w-full h-64 bg-black rounded-lg overflow-hidden border border-cyan-500/30 group">
+             <img src={imageUrl} className="w-full h-full object-cover" />
+             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                 <a href={`https://www.mapillary.com/app/?pKey=${imageKey}`} target="_blank" className="text-white text-xs underline">Open in Mapillary</a>
+             </div>
+        </div>
+    )
+}
 
 // Map Controller for data fetching and view interactions
 const MapController = ({
@@ -285,11 +324,6 @@ export default function LiveMap() {
             <PoleLinesLayer zoom={zoomLevel} />
 
             {/* 2. LAYER: DOTS (Visible at High Zoom) */}
-            {/* Logic: 
-                Zoom < 11: Hidden (Lines only)
-                Zoom 11-13: Small dots + Lines
-                Zoom > 13: Full dots
-            */}
             {zoomLevel >= 11 && assets.map(pole => (
                <CircleMarker
                   key={pole.id}
@@ -314,60 +348,75 @@ export default function LiveMap() {
                >
                   {selectedPole && selectedPole.id === pole.id && (
                      <Popup
-                        className="cyber-popup"
+                        className="cyber-popup p-0 border-none bg-transparent"
                         closeButton={false}
-                        minWidth={300}
-                        maxWidth={300}
-                        offset={[0, 150]}
+                        minWidth={350}
+                        maxWidth={350}
+                        offset={[0, 50]}
                      >
-                        {/* SATELLITE LENS CONTAINER */}
-                        <div className="relative w-[300px] h-[300px] flex items-center justify-center pointer-events-none">
+                        <Card className="w-[350px] border-cyan-500/50 bg-black/90 backdrop-blur-xl text-white">
+                            <CardHeader className="py-2 border-b border-white/10">
+                                <CardTitle className=" text-sm flex items-center justify-between">
+                                    <span className="text-cyan-400 font-mono">{pole.id}</span>
+                                    <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
+                                        pole.status === 'Verified' ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'
+                                    }`}>{pole.status}</span>
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-0">
+                                <Tabs defaultValue={pole.mapillary_key ? "mapillary" : "satellite"} className="w-full">
+                                    <TabsList className="w-full rounded-none bg-white/5 border-b border-white/10 grid grid-cols-3">
+                                        <TabsTrigger value="mapillary">Mapillary</TabsTrigger>
+                                        <TabsTrigger value="satellite">Satellite</TabsTrigger>
+                                        <TabsTrigger value="google">Google</TabsTrigger>
+                                    </TabsList>
+                                    
+                                    <div className="h-64 bg-black relative">
+                                        <TabsContent value="mapillary" className="m-0 h-full p-2">
+                                            {pole.mapillary_key ? (
+                                                <MapillaryImage imageKey={pole.mapillary_key} />
+                                            ) : (
+                                                <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs">
+                                                    <Maximize2 className="w-8 h-8 mb-2 opacity-50" />
+                                                    No Mapillary Data
+                                                </div>
+                                            )}
+                                        </TabsContent>
+                                        
+                                        <TabsContent value="satellite" className="m-0 h-full">
+                                            <img
+                                                 src={getTileUrl(pole.lat, pole.lng, 19)}
+                                                 className="w-full h-full object-cover"
+                                            />
+                                            {/* Overlays */}
+                                            <div className="absolute inset-0 border-[20px] border-black/20 pointer-events-none rounded-none"/>
+                                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 border-2 border-cyan-500 rounded-full animate-pulse shadow-[0_0_15px_rgba(34,211,238,0.5)]"/>
+                                        </TabsContent>
 
-                           {/* 1. GLOWING ROTATING OUTER RING */}
-                           <div className="absolute inset-0 rounded-full border border-cyan-500/30 shadow-[0_0_30px_rgba(34,211,238,0.2)] animate-[spin_8s_linear_infinite]"></div>
-                           <div className="absolute inset-[2px] rounded-full border border-cyan-400/50 border-dashed animate-[spin_12s_linear_infinite_reverse]"></div>
-
-                           {/* 2. SOLID SATELLITE IMAGE (Cropped to Circle) */}
-                           <div className="absolute inset-[6px] rounded-full overflow-hidden border border-white/10 shadow-inner bg-black">
-                              <div
-                                 className="w-full h-full"
-                                 style={{
-                                    backgroundImage: `url(${getTileUrl(pole.lat, pole.lng, 19)})`,
-                                    backgroundSize: 'cover',
-                                    backgroundPosition: 'center',
-                                    filter: 'brightness(1.1) contrast(1.1)'
-                                 }}
-                              ></div>
-                           </div>
-
-                           {/* 3. TARGETING OVERLAYS */}
-                           <div className="absolute w-12 h-12 rounded-full border-2 border-cyan-400 shadow-[0_0_15px_#22d3ee] animate-pulse z-10"></div>
-
-                           {/* Decorative Crosshairs */}
-                           <div className="absolute w-[280px] h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent z-10"></div>
-                           <div className="absolute h-[280px] w-[1px] bg-gradient-to-b from-transparent via-cyan-500/20 to-transparent z-10"></div>
-
-                           {/* 4. DATA TAGS */}
-                           <div className="absolute top-3/4 left-1/2 -translate-x-1/2 mt-4 text-center z-20">
-                              <div className="bg-black/80 backdrop-blur-md px-3 py-1 rounded-full border border-cyan-500/50 shadow-lg">
-                                 <span className="font-mono text-[10px] text-cyan-300 font-bold tracking-wider">CONFIDENCE: {(pole.confidence * 100).toFixed(0)}%</span>
-                              </div>
-
-                              {/* STREET VIEW LINK */}
-                              <div className="mt-2 pointer-events-auto">
-                                 <a
-                                    href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pole.lat},${pole.lng}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 text-[10px] font-bold py-1 px-3 rounded-full border border-cyan-500/50 transition-colors flex items-center gap-1 no-underline"
-                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                                    STREET VIEW
-                                 </a>
-                              </div>
-                           </div>
-
-                        </div>
+                                        <TabsContent value="google" className="m-0 h-full p-2 flex flex-col items-center justify-center">
+                                            <a
+                                                href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pole.lat},${pole.lng}`}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded text-sm transition-colors text-white no-underline"
+                                            >
+                                                <ExternalLink className="w-4 h-4" />
+                                                Open Google Street View
+                                            </a>
+                                            <p className="text-[10px] text-gray-500 mt-2 text-center max-w-[200px]">
+                                                Google Embed API requires Key. Click to open in new tab.
+                                            </p>
+                                        </TabsContent>
+                                    </div>
+                                    
+                                    {/* Footer Info */}
+                                    <div className="p-3 bg-white/5 border-t border-white/10 flex justify-between items-center text-xs font-mono">
+                                        <span className="text-gray-400">CONF: {(pole.confidence * 100).toFixed(0)}%</span>
+                                        <span className="text-gray-400">{pole.lat.toFixed(5)}, {pole.lng.toFixed(5)}</span>
+                                    </div>
+                                </Tabs>
+                            </CardContent>
+                        </Card>
                      </Popup>
                   )}
                </CircleMarker>
@@ -378,22 +427,19 @@ export default function LiveMap() {
    )
 }
 
-// Network Visualization Layer (Low Zoom - Pre-computed Global)
+// Network Visualization layer etc...
 const PoleLinesLayer = ({ zoom }: { zoom: number }) => {
    const [networkData, setNetworkData] = useState<any>(null)
 
    useEffect(() => {
-      fetch('/pole_network.geojson')
+      fetch('/pole_network.geojson') // Make sure this endpoint exists or mock it
          .then(res => res.json())
          .then(data => setNetworkData(data))
          .catch(err => console.error("Failed to load network layer:", err))
    }, [])
 
-   // Logic: Show GLOBAL lines if zoomed out (High Level View)
-   // Hide lines when zoomed in to focus on specific poles (Asset Level View)
    if (zoom > 13 || !networkData) return null
 
-   // Dynamic Style based on Zoom
    const opacity = zoom < 11 ? 0.6 : Math.max(0.1, 0.6 - ((zoom - 11) * 0.2))
    const weight = zoom < 11 ? 1.5 : 1
 
@@ -401,7 +447,7 @@ const PoleLinesLayer = ({ zoom }: { zoom: number }) => {
       <GeoJSON
          data={networkData}
          style={{
-            color: '#22d3ee', // Cyan "Electric" lines
+            color: '#22d3ee',
             weight: weight,
             opacity: opacity,
             interactive: false
@@ -410,7 +456,6 @@ const PoleLinesLayer = ({ zoom }: { zoom: number }) => {
    )
 }
 
-// Utility to bubble up zoom state
 const MapEventsHandler = ({ setZoomLevel }: { setZoomLevel: (z: number) => void }) => {
    const map = useMapEvents({
       zoomend: () => setZoomLevel(map.getZoom())
