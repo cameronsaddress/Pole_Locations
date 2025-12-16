@@ -1,0 +1,4 @@
+train: ../data/training/satellite_drops/images
+val: ../data/training/satellite_drops/images
+nc: 1
+names: ['utility_pole']

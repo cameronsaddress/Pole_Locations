@@ -1,0 +1,4 @@
+train: ../data/training/layer1_drops/images
+val: ../data/training/layer1_drops/images
+nc: 1
+names: ['utility_pole']

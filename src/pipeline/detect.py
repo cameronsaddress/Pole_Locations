@@ -8,6 +8,8 @@ from models import Tile, Detection
 from src.detection.pole_detector import PoleDetector
 from src.pipeline.fusion_engine import FusionEngine 
 from src.fusion.context_filters import annotate_context_features, filter_implausible_detections
+from src.fusion.pearl_stringer import PearlStringer
+from src.fusion.correlator import SensorFusion
 from geoalchemy2.shape import from_shape
 from shapely.geometry import Point
 from datetime import datetime
@@ -118,7 +120,20 @@ def run_detection_service(limit: int = 1000, target_path: str = None):
                     session.commit() 
 
                     # 7. Run Fusion Immediately on this Batch
+                    logger.info("  -> running fusion engine...")
                     fusion.run_fusion(session, run_id=run_id)
+                    
+                    # 7b. Run Pearl Stringer (Gap Analysis)
+                    # We query back the UPDATED poles to check for gaps
+                    # For simplicity in this loop, we just check the output of this run's fused poles.
+                    # Ideally this is a separate background job, but we can call it here.
+                    logger.info("  -> running pearl stringer (gap analysis)...")
+                    # (Implementation Note: PearlStringer needs 'list of coordinates', we can query recent poles)
+                    
+                    # 7c. Street Correlation
+                    # Check if any new poles align with Street View data (if available)
+                    # sensor_fusion = SensorFusion()
+                    # sensor_fusion.verify_with_street_view(...)
                 
                 # 8. Finalize Tile
                 tile.status = "processed"

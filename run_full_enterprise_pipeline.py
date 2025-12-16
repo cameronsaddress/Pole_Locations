@@ -93,19 +93,56 @@ def main():
     else:
         logger.info("⏭️  Skipping Data Integrity Check (User Request).")
 
-    # --- STEP 1: TRAIN YOLO11 ---
+    # --- STEP 1: TRAIN YOLO11 (Dual-Stream) ---
     if not args.skip_train:
-        logger.info("--- [STEP 1/4] Training YOLO11l Model ---")
+        logger.info("--- [STEP 1/4] Training YOLO11l Model (Dual-Stream) ---")
+        
+        # 1. Generate Dataset YAML
+        logger.info("Generating Dual-Stream Dataset YAML...")
+        
+        # Create helper script if it doesn't exist (simpler than inline)
+        yaml_script = """
+import yaml
+import os
+from pathlib import Path
+
+data = {
+    'path': '/workspace/data/training/unified_dataset',
+    'train': 'images/train',
+    'val': 'images/val',
+    'nc': 1,
+    'names': ['utility_pole']
+}
+
+Path('/workspace/data/training/unified_dataset').mkdir(parents=True, exist_ok=True)
+with open('/workspace/data/training/unified_dataset/dataset.yaml', 'w') as f:
+    yaml.dump(data, f)
+print("YAML Generated.")
+"""
+        with open("src/utils/gen_yaml.py", "w") as f:
+            f.write(yaml_script)
+            
+        run_command("python3 src/utils/gen_yaml.py")
+        
+        # 2. Prepare Data (Merge Sat + Street)
+        # We need a script to shuffle and split the data into train/val
+        logger.info("Merging Satellite and Street datasets...")
+        merge_cmd = "python3 src/utils/prepare_dual_stream_dataset.py" 
+        # (We need to create this script, or we can inline it if simple)
+        # For now, assuming we will create it.
+        run_command(merge_cmd)
+
+        # 3. Train
         train_cmd = (
             "yolo detect train "
             "model=yolo11l.pt "
-            "data=/workspace/data/processed/pole_training_dataset_512/dataset.yaml "
+            "data=/workspace/data/training/unified_dataset/dataset.yaml "
             "epochs=50 "
-            "imgsz=512 "
+            "imgsz=640 " # Increased to 640 for better small object detection
             "batch=16 "
             "workers=8 "
             "project=/workspace/models/checkpoints "
-            "name=yolo11l_full_run "
+            "name=yolo11l_dual_stream "
             "device=0 "
             "exist_ok=True"
         )

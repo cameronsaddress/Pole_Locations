@@ -19,7 +19,13 @@ def fetch_grid_backbone(bbox=None):
     Query Overpass for 'power=line' (high voltage) and 'power=tower'.
     """
     if bbox is None:
-        bbox = EAST_COAST_BBOX
+        # Harrisburg BBOX (Target Pilot Area)
+        bbox = {
+            "minx": -77.05,
+            "miny": 40.20,
+            "maxx": -76.80,
+            "maxy": 40.40
+        }
         
     # Overpass QL
     # Fetch high voltage lines and towers
@@ -27,7 +33,9 @@ def fetch_grid_backbone(bbox=None):
     [out:json][timeout:60];
     (
       way["power"="line"]({bbox['miny']},{bbox['minx']},{bbox['maxy']},{bbox['maxx']});
+      way["power"="minor_line"]({bbox['miny']},{bbox['minx']},{bbox['maxy']},{bbox['maxx']});
       node["power"="tower"]({bbox['miny']},{bbox['minx']},{bbox['maxy']},{bbox['maxx']});
+      node["power"="pole"]({bbox['miny']},{bbox['minx']},{bbox['maxy']},{bbox['maxx']});
     );
     /* Recurse down to get geometry */
     (._;>;);
@@ -124,3 +132,7 @@ class GridConnector:
         results.iloc[nearest_idxs[0]] = dists.values
         
         return results.tolist()
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    fetch_grid_backbone()

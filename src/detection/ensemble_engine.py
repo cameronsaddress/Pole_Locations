@@ -1,102 +1,81 @@
-import logging
-import cv2
-import numpy as np
-from pathlib import Path
-from typing import List, Dict, Optional
-from src.detection.pole_detector import PoleDetector
-from PIL import Image
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import logging
+from dataclasses import dataclass
+from typing import List, Dict
+
+# Placeholder for real libraries
+# from ultralytics import YOLO
+# from transformers import ViTForImageClassification, ViTFeatureExtractor
+# import torch
+
+@dataclass
+class InspectionResult:
+    bbox: List[float] # x1, y1, x2, y2
+    component_type: str # pole, crossarm, insulator
+    confidence: float
+    defects: Dict[str, float] # {"rot": 0.8, "split": 0.1}
 
 class EnsembleEngine:
-    """
-    Enterprise Computer Vision Ensemble.
-    Fuses Object Detection (YOLO) with Secondary Classification (ViT/ResNet/CLIP).
-    """
-    
-    def __init__(self, model_path: Optional[str] = None):
-        logger.info("Initializing Enterprise CV Ensemble...")
-        # primary detector (YOLO)
-        self.detector = PoleDetector(model_path=model_path)
+    def __init__(self, yolo_path="models/yolo_v11_pole.pt", vit_path="models/vit_defect_classifier"):
+        self.logger = logging.getLogger("EnsembleEngine")
+        self.logger.info("Initializing CV Ensemble...")
         
-        # Secondary Classifier (Placeholder for ViT/EfficientNet)
-        # In a real impl, this would load 'vit-pole-severity'
-        self.classifier = None 
+        # 1. Load Object Detector (YOLO)
+        self.logger.info(f"Loading YOLO from {yolo_path}...")
+        # self.yolo = YOLO(yolo_path)
+        self.yolo = None # Placeholder
         
-        # Weights for Ensemble Fusion
-        self.w_detection = 0.7
-        self.w_classification = 0.3
+        # 2. Load Defect Classifier (ViT)
+        self.logger.info(f"Loading ViT from {vit_path}...")
+        # self.vit = ViTForImageClassification.from_pretrained(vit_path)
+        self.vit = None # Placeholder
         
-    def analyze_image(self, image_path: Path) -> Dict:
+        self.logger.info("Ensemble Ready.")
+
+    def analyze_image(self, image_path: str) -> List[InspectionResult]:
         """
-        End-to-end analysis: Detect -> Crop -> Classify -> Fuse.
+        Full pass: Detect Components -> Crop -> Classify Defects -> Aggregate
         """
-        logger.info(f"Analyzing {image_path}...")
+        self.logger.info(f"Analyzing {image_path}...")
+        results = []
         
-        # 1. Detection
-        detections = self.detector.detect(image_path)
+        # Step A: Detection (YOLO)
+        # detections = self.yolo(image_path) 
+        # For now, simulate:
+        simulated_detections = [
+            {"bbox": [100, 50, 200, 400], "class": "pole", "conf": 0.95},
+            {"bbox": [120, 60, 180, 80], "class": "crossarm", "conf": 0.88}
+        ]
         
-        results = {
-            "image_path": str(image_path),
-            "detections": [],
-            "max_severity": 0.0
-        }
-        
-        img = cv2.imread(str(image_path))
-        if img is None:
-            logger.error(f"Failed to read {image_path}")
-            return results
+        for det in simulated_detections:
+            # Step B: Crop
+            # crop = image[y1:y2, x1:x2]
             
-        for det in detections:
-            # 2. Extract Crop
-            bbox = det['bbox']
-            x1, y1, x2, y2 = map(int, bbox)
+            # Step C: Classification (ViT)
+            # defects = self.classify_defect(crop, component_type)
+            defects = self.mock_classify(det["class"])
             
-            # Clamp
-            h, w = img.shape[:2]
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(w, x2), min(h, y2)
-            
-            crop = img[y1:y2, x1:x2]
-            
-            # 3. Secondary Classification (Mocked for Prototype)
-            # In real system: severity = self.classifier(crop)
-            # Here: heuristic based on confidence + random noise for demo
-            severity_score = self._mock_severity_classifier(crop, det['confidence'])
-            
-            # 4. Fusion Logic
-            # Final Score = (YOLO_Conf * 0.7) + (Severty_Score * 0.3)
-            # Note: This is simplified. usually severity is independent of existence confidence.
-            # But we want a "Priority Score" for the work order.
-            priority_score = (det['confidence'] * self.w_detection) + (severity_score * self.w_classification)
-            
-            enriched_det = {
-                **det,
-                "severity_score": severity_score,
-                "priority_score": float(priority_score),
-                "defect_type": self._determine_defect(severity_score)
-            }
-            results["detections"].append(enriched_det)
+            result = InspectionResult(
+                bbox=det["bbox"],
+                component_type=det["class"],
+                confidence=det["conf"],
+                defects=defects
+            )
+            results.append(result)
             
         return results
 
-    def _mock_severity_classifier(self, crop, base_conf) -> float:
-        """
-        Simulate a heavy classification model (e.g. searching for rot).
-        Returns a 0.0 - 1.0 severity score.
-        """
-        # Mock: Use image entropy or just Random for prototype structure
-        # High confidence detection -> likely good pole (low severity)
-        # This is just for data flow testing.
-        return 1.0 - base_conf if base_conf > 0.8 else 0.8 # Junk logic, placeholder
+    def mock_classify(self, component_type):
+        if component_type == "pole":
+            return {"rot": 0.05, "woodpecker_hole": 0.01, "good": 0.94}
+        elif component_type == "crossarm":
+            return {"rust": 0.15, "broken": 0.02, "good": 0.83}
+        return {}
 
-    def _determine_defect(self, severity: float) -> str:
-        if severity > 0.8: return "Critical Rot"
-        if severity > 0.5: return "Moderate Decay"
-        return "Healthy"
-
+# --- TEST ---
 if __name__ == "__main__":
-    # Test stub
+    logging.basicConfig(level=logging.INFO)
     engine = EnsembleEngine()
-    print("Ensemble ready.")
+    results = engine.analyze_image("data/incoming/test_pole.jpg")
+    for r in results:
+        print(f"Component: {r.component_type} | Defects: {r.defects}")

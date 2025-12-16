@@ -358,7 +358,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                     map.current?.addSource('counties', { type: 'geojson', data: cData })
                     map.current?.addLayer({ id: 'counties-line', type: 'line', source: 'counties', paint: { 'line-color': '#22d3ee', 'line-width': 1, 'line-opacity': 0.3 } })
 
-                    const nData = await fetch('/pole_network.geojson').then(r => r.json())
+                    const nData = await fetch('/pole_network_v2.geojson').then(r => r.json())
                     map.current?.addSource('network', { type: 'geojson', data: nData })
                     map.current?.addLayer({ id: 'network-line', type: 'line', source: 'network', paint: { 'line-color': '#22d3ee', 'line-width': 3, 'line-opacity': 0.6 } }, 'assets-glow')
                 } catch (e) { console.warn(e) }
