@@ -267,6 +267,59 @@ We moved from a generic single model to a specialized **Expert Ensemble**:
 *   **Street Expert (`yolo11l_street_expert.pt`)**: Optimized for vertical structures and cross-arms (Ego-centric).
 *   **Pipeline impl**: The `PoleDetector` auto-selects the correct expert based on input source.
 
+---
+
+# 🔎 System Architecture & Logic Report (Dec 2025)
+
+## 1. High-Level Architecture
+The system is a **Multi-Modal AI Pipeline** designed to identify utility infrastructure (poles) by fusing Top-Down (Satellite) and Ego-Centric (Street) imagery. It follows a strict **Orchestrator-Worker** pattern running on NVIDIA GPU containers.
+
+*   **Infrastructure:** 4 Docker Containers (`polevision-gpu`, `polevision-db`, `polevision-api`, `polevision-web`).
+*   **State:** **Production Beta** (Mining Active, Training Active, Inference Wired).
+
+## 2. Data Sources (Inputs)
+| Source | Type | Status | Role |
+| :--- | :--- | :--- | :--- |
+| **PASDA** | Orthoimagery (GeoTIFF) | 🟢 **Active** | Primary Search Grid (Top-Down). 1ft/pixel resolution. |
+| **Mapillary** | Street View Metadata | 🟢 **Active** | Ego-Motion Sensor Fusion (Cam Heading, Location). |
+| **USGS 3DEP** | Lidar (DSM) | 🟢 **Active** | Height Verification (Context Filter). |
+| **OpenInfraMap** | Vector Data | 🟢 **Active** | Grid Backbone (Transmission Lines) context. |
+
+## 3. AI Models (The Brains)
+We utilize a **Dual-Expert** architecture utilization two specialists:
+
+1.  **Satellite Expert (`yolo11l_satellite_expert.pt`)**: Specialized in top-down dots and shadows.
+2.  **Street Expert (`yolo11l_street_expert.pt`)**: Specialized in vertical wooden cylinders and transformers.
+3.  **Grounding DINO**: The "Teacher" model used for zero-shot mining and label generation.
+
+## 4. The "Enterprise Pipeline" Flow
+The script `run_full_enterprise_pipeline.py` controls the entire lifecycle:
+
+#### **Stage 1: Ingestion & Training**
+1.  **Ingest:** Scans folders for new GeoTIFFs.
+2.  **Train:** Generates `dataset.yaml`, trains both experts sequentially.
+
+#### **Stage 2: Discovery (Satellite)**
+*   **Action:** Scans the 1km tile using **Satellite Expert**.
+*   **Filter:** Drops detections in `water` or far from `roads`.
+*   **Output:** "Flagged" poles in the database.
+
+#### **Stage 3: Advanced Fusion (The Logic Layer)**
+Once a "Flagged" pole is in memory, the `FusionEngine` triggers:
+
+*   **A. "String of Pearls" (`pearl_stringer.py`)**
+    *   **Concept:** Poles live in chains.
+    *   **Logic:** If `Pole A` and `Pole B` are 90m apart, it infers a **Missing** `Pole C` at the midpoint.
+    *   **Action:** Inserts a `Missing` pole record to trigger a targeted AI Re-Scan.
+
+*   **B. Sensor Fusion Ray-Casting (`correlator.py`)**
+    *   **Concept:** Triangulation.
+    *   **Logic:** Queries `street_view_images` for cars within 500m.
+    *   **verification:** Projects a ray from the car's camera. If it intersects the satellite point -> **CONFIRMED**.
+    *   **Visual Check:** Downloads the actual Mapillary image and runs **Street Expert** to visually confirm the asset.
+
+---
+
 ### 3. Sensor Fusion & Correlation (Live)
 The pipeline now features a fully active Correlation Engine:
 *   **Metadata Ingestion**: `src/ingestion/ingest_mapillary_metadata.py` populates the `street_view_images` PostGIS table.

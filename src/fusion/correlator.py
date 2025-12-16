@@ -64,28 +64,64 @@ class SensorFusion:
     def verify_with_street_view(self, pole_lat, pole_lon, car_lat, car_lon, camera_heading, tolerance_deg=10.0):
         """
         Projects a ray from the car to the candidate pole and checks if it aligns with the camera heading.
-        
-        Args:
-            pole_lat/lon: The candidate pole location (e.g., from Satellite).
-            car_lat/lon: The GPS position of the street view car.
-            camera_heading: The compass heading of the camera (0-360).
-            tolerance_deg: Acceptable angular deviation.
-            
-        Returns:
-            (bool, float): (Match Success, Deviation in Degrees)
+        Returns: (is_match, deviation)
         """
         expected_bearing = self.calculate_bearing(car_lat, car_lon, pole_lat, pole_lon)
-        
         deviation = abs(expected_bearing - camera_heading)
-        # Handle wrap-around (e.g. 359 vs 1)
-        if deviation > 180:
-            deviation = 360 - deviation
+        if deviation > 180: deviation = 360 - deviation
             
         is_match = deviation <= tolerance_deg
         
         self.logger.info(f"Fusion Check: Car Bearing {expected_bearing:.1f}° vs Cam {camera_heading:.1f}° | Dev: {deviation:.1f}° | Match: {is_match}")
-        
         return is_match, deviation
+
+    def verify_visually(self, session, street_image_id: str, street_model, expected_bearing=None):
+        """
+        Downloads the specific Mapillary image and runs the Street Expert model.
+        """
+        import requests
+        from PIL import Image
+        import io
+        import os
+        
+        token = os.getenv("MAPILLARY_TOKEN")
+        if not token:
+            self.logger.warning("No MAPILLARY_TOKEN, skipping visual verify.")
+            return False
+
+        # 1. Get Image URL
+        url = f"https://graph.mapillary.com/{street_image_id}?access_token={token}&fields=thumb_2048_url"
+        try:
+            resp = requests.get(url, timeout=5)
+            if resp.status_code != 200:
+                return False
+            img_url = resp.json().get('thumb_2048_url')
+            
+            # 2. Download Image
+            img_resp = requests.get(img_url, timeout=10)
+            img = Image.open(io.BytesIO(img_resp.content))
+            
+            # 3. Run Inference
+            results = street_model(img, verbose=False)
+            
+            # 4. Check Detections
+            # Simple check: Did we find a pole with high confidence?
+            # Advanced: Check if detection bbox center x-coordinate aligns with expected_bearing relative to center of image
+            # (Assuming panoramic or wide angle, center is camera_heading)
+            
+            for r in results:
+                for box in r.boxes:
+                    if box.conf[0] > 0.5:
+                        self.logger.info(f"Visual Confirmation: Found pole in {street_image_id} (conf {box.conf[0]:.2f})")
+                        return True
+                        
+            self.logger.info(f"Visual Check: No poles found in {street_image_id}")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Visual Verification Failed: {e}")
+            return False
+
 
 # --- TEST HARNESS ---
 if __name__ == "__main__":

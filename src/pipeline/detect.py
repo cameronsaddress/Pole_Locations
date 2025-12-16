@@ -10,7 +10,7 @@ from src.pipeline.fusion_engine import FusionEngine
 from src.fusion.context_filters import annotate_context_features, filter_implausible_detections
 from src.fusion.pearl_stringer import PearlStringer
 from src.fusion.correlator import SensorFusion
-from geoalchemy2.shape import from_shape
+from geoalchemy2.shape import from_shape, to_shape
 from shapely.geometry import Point
 from datetime import datetime
 
@@ -124,17 +124,17 @@ def run_detection_service(limit: int = 1000, target_path: str = None):
                     fusion.run_fusion(session, run_id=run_id)
                     
                     # 7b. Run Pearl Stringer (Gap Analysis)
-                    # We query back the UPDATED poles to check for gaps
                     logger.info("  -> running pearl stringer (gap analysis)...")
                     try:
-                        # Get bounds of current tile
-                        tile_poly = from_shape(Point(df['lon'].mean(), df['lat'].mean()), srid=4326).buffer(0.01) # Approx 1km buffer
+                        # Logic: Extract ALL pole locations in this tile from DB (not just this batch)
+                        # For now, we use the batch for simplicity + recent history
+                        # Ideally: stringer_input = session.exec(select(Pole.location)...).all()
                         
-                        # Find confirmed poles in this area
-                        # We need to map this appropriately or just use the Stringer's internal logic if it accepts a session
-                        # stringer = PearlStringer(session)
-                        # stringer.analyze_and_fill_gaps(tile_poly)
-                        pass # Placeholder until PearlStringer accepts Session directly
+                        batch_coords = [(d.location.y, d.location.x) for d in detections_to_add]
+                        
+                        stringer = PearlStringer(spacing_min=30, spacing_max=60)
+                        stringer.find_missing_pearls(batch_coords, session=session, write_to_db=True)
+                        
                     except Exception as e:
                         logger.warning(f"PearlStringer skipped: {e}")
                     
@@ -142,34 +142,55 @@ def run_detection_service(limit: int = 1000, target_path: str = None):
                     logger.info("  -> running sensor fusion (street view correlation)...")
                     sensor_fusion = SensorFusion()
                     
-                    # Re-query the poles just validated
-                    # For every new "Flagged" pole, check if we have Street View confirmation
-                    # optimized: do this in bulk or per pole? Per pole for now.
-                    
-                    # We need the list of JUST added poles. But 'detections_to_add' are Detections, not Poles.
-                    # The Fusion Engine created the Poles.
-                    # Query for poles created in the last minute in this area?
-                    
-                    # Simpler: Iterate the detections, find the matching Pole, check street view.
-                    # This requires FusionEngine to return the mapped Pole IDs.
-                    # For now, we will perform a spatial query for Street View images near the detections
-                    
+                    # Spatial Query for Street View Images
                     street_images_stmt = select(StreetViewImage).where(
                         StreetViewImage.location.ST_DWithin(
                             from_shape(Point(df['lon'].mean(), df['lat'].mean()), srid=4326), 
-                            500 # 500 meters radius from center of tile batch
+                            500 
                         )
                     )
                     street_images = session.exec(street_images_stmt).all()
                     
                     if street_images:
-                        logger.info(f"    Found {len(street_images)} street view images for correlation.")
-                        # Logic: For each Detection, find closest Street Image, check bearing
+                        logger.info(f"    Found {len(street_images)} street view images.")
+                        
+                        # Get Street Expert Model
+                        street_model = detector.models.get('street')
+                        
                         for det in detections_to_add:
-                            det_pt = det.location
-                            # In real logic, we'd cast det_pt back to lat/lon
-                            # ...
-                            pass
+                            # det.location is WKBElement, simpler to use original df row or convert
+                            py_pt = to_shape(det.location) 
+                            p_lat, p_lon = py_pt.y, py_pt.x
+                            
+                            # Find best image match
+                            for img in street_images:
+                                img_pt = to_shape(img.location)
+                                i_lat, i_lon = img_pt.y, img_pt.x
+                                
+                                # Geometric Check
+                                match, dev = sensor_fusion.verify_with_street_view(
+                                    p_lat, p_lon, i_lat, i_lon, img.heading, tolerance_deg=15.0
+                                )
+                                
+                                if match:
+                                    logger.info(f"    ⚡ Geometric Match! Pole {det.id} aligned with Image {img.image_key}")
+                                    
+                                    # Visual Verification (V2)
+                                    if street_model:
+                                        confirmed = sensor_fusion.verify_visually(session, img.image_key, street_model)
+                                        if confirmed:
+                                            # Upgrade Pole Status to 'Confirmed' or add tag
+                                            # We need to find the POLE associated with this detection.
+                                            # FusionEngine created it. We don't have the ID easy here.
+                                            # We can update the Detection tag
+                                            det.tags['visual_confirmation'] = True
+                                            det.tags['confirmed_by_image'] = img.image_key
+                                            session.add(det)
+                                            # Ideally update the Pole too.
+                                            logger.info(f"    🌟 VISUAL CONFIRMATION SUCCESS for Detection {det.id}")
+                                            
+                                    break # Stop after first confirming image
+                                    
                     else:
                         logger.debug("    No street view images found for correlation.")
                 
