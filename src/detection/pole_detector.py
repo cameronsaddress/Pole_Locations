@@ -110,6 +110,40 @@ class PoleDetector:
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         if torch.cuda.is_available():
             logger.info("Using GPU: %s", torch.cuda.get_device_name(0))
+            
+        # --- DUAL-EXPERT LOADING ---
+        # Instead of self.model, we hold a registry
+        self.models = {}
+        
+        # 1. Satellite Expert
+        sat_path = CHECKPOINTS_DIR / "yolo11l_satellite_expert" / "weights" / "best.pt"
+        if sat_path.exists():
+            logger.info(f"Loading SATELLITE Expert: {sat_path}")
+            self.models['satellite'] = YOLO(str(sat_path))
+        else:
+            logger.info("Satellite Expert not found, falling back to base/legacy.")
+            # Fallback path logic
+            res_path = self._resolve_model_path(model_path)
+            self.models['satellite'] = YOLO(str(res_path) if res_path else f'{MODEL_TYPE}.pt')
+
+        # 2. Street Expert (Optional fallback to Sat if missing, but ideally distinct)
+        street_path = CHECKPOINTS_DIR / "yolo11l_street_expert" / "weights" / "best.pt"
+        if street_path.exists(): 
+             logger.info(f"Loading STREET Expert: {street_path}")
+             self.models['street'] = YOLO(str(street_path))
+        else:
+             logger.info("Street Expert not found. Using Satellite model as Proxy.")
+             self.models['street'] = self.models['satellite']
+             
+        # Set default for implicit calls
+        self.model = self.models['satellite'] 
+        
+        # GPU Transfer
+        for k, m in self.models.items():
+            try:
+                m.to(self.device)
+            except: 
+                pass
         
         # Initialize Zero-Shot Classifier
         self.classifier = None
@@ -377,12 +411,13 @@ class PoleDetector:
             candidates.append(Path(model_path))
 
         candidates.extend([
+            # Dual-Stream Enterprise Model (Merged Sat+Street)
+            CHECKPOINTS_DIR / "yolo11l_dual_stream" / "weights" / "best.pt",
+            
+            # Legacy Fallbacks
             # CHECKPOINTS_DIR / "yolo11l_full_run" / "weights" / "best.pt",
-            # CHECKPOINTS_DIR / "yolo11l_pole_v1" / "weights" / "best.pt",
             MODELS_DIR / "pole_detector_v7" / "weights" / "best.pt",
             MODELS_DIR / "pole_detector_real.pt",
-            # Legacy checkpoints removed to enforce YOLO11 usage
-            # MODELS_DIR / "yolov8l_v1" / "weights" / "best.pt",
         ])
 
         for candidate in candidates:
@@ -659,7 +694,10 @@ class PoleDetector:
 
     def _process_batch(self, images, meta, detections, seen_coords, duplicate_threshold_m, transform, crs, tile_path, crop_size):
         """Helper to run inference on a batch and process results."""
-        results = self.model.predict(
+        # EXPLICITLY USE SATELLITE EXPERT
+        expert_model = self.models.get('satellite', self.model)
+        
+        results = expert_model.predict(
             source=images,
             conf=self.confidence,
             iou=self.iou,

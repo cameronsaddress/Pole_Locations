@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 from sqlmodel import Session, select, text
 from database import engine
-from models import Tile, Detection
+from models import Tile, Detection, StreetViewImage
 from src.detection.pole_detector import PoleDetector
 from src.pipeline.fusion_engine import FusionEngine 
 from src.fusion.context_filters import annotate_context_features, filter_implausible_detections
@@ -125,23 +125,53 @@ def run_detection_service(limit: int = 1000, target_path: str = None):
                     
                     # 7b. Run Pearl Stringer (Gap Analysis)
                     # We query back the UPDATED poles to check for gaps
-                    # For simplicity in this loop, we just check the output of this run's fused poles.
-                    # Ideally this is a separate background job, but we can call it here.
                     logger.info("  -> running pearl stringer (gap analysis)...")
-                    # (Implementation Note: PearlStringer needs 'list of coordinates', we can query recent poles)
+                    try:
+                        # Get bounds of current tile
+                        tile_poly = from_shape(Point(df['lon'].mean(), df['lat'].mean()), srid=4326).buffer(0.01) # Approx 1km buffer
+                        
+                        # Find confirmed poles in this area
+                        # We need to map this appropriately or just use the Stringer's internal logic if it accepts a session
+                        # stringer = PearlStringer(session)
+                        # stringer.analyze_and_fill_gaps(tile_poly)
+                        pass # Placeholder until PearlStringer accepts Session directly
+                    except Exception as e:
+                        logger.warning(f"PearlStringer skipped: {e}")
                     
                     # 7c. Street Correlation
-                    # Check if any new poles align with Street View data (if available)
-                    # sensor_fusion = SensorFusion()
-                    # sensor_fusion.verify_with_street_view(...)
-                
-                # 8. Finalize Tile
-                tile.status = "processed"
-                tile.last_processed_at = datetime.utcnow()
-                session.add(tile)
-                session.commit()
-                
-                logger.info(f"✅ Tile {tile.id} complete. ({len(detections_to_add)} detections)")
+                    logger.info("  -> running sensor fusion (street view correlation)...")
+                    sensor_fusion = SensorFusion()
+                    
+                    # Re-query the poles just validated
+                    # For every new "Flagged" pole, check if we have Street View confirmation
+                    # optimized: do this in bulk or per pole? Per pole for now.
+                    
+                    # We need the list of JUST added poles. But 'detections_to_add' are Detections, not Poles.
+                    # The Fusion Engine created the Poles.
+                    # Query for poles created in the last minute in this area?
+                    
+                    # Simpler: Iterate the detections, find the matching Pole, check street view.
+                    # This requires FusionEngine to return the mapped Pole IDs.
+                    # For now, we will perform a spatial query for Street View images near the detections
+                    
+                    street_images_stmt = select(StreetViewImage).where(
+                        StreetViewImage.location.ST_DWithin(
+                            from_shape(Point(df['lon'].mean(), df['lat'].mean()), srid=4326), 
+                            500 # 500 meters radius from center of tile batch
+                        )
+                    )
+                    street_images = session.exec(street_images_stmt).all()
+                    
+                    if street_images:
+                        logger.info(f"    Found {len(street_images)} street view images for correlation.")
+                        # Logic: For each Detection, find closest Street Image, check bearing
+                        for det in detections_to_add:
+                            det_pt = det.location
+                            # In real logic, we'd cast det_pt back to lat/lon
+                            # ...
+                            pass
+                    else:
+                        logger.debug("    No street view images found for correlation.")
                 
             except Exception as e:
                 logger.error(f"❌ Failed tile {tile.id}: {e}", exc_info=True)

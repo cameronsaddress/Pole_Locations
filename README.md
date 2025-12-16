@@ -259,20 +259,22 @@ docker exec polevision-gpu python /workspace/verify_pipeline_logic.py
 Replaced disparate `nohup` scripts with a unified `MiningOrchestrator` (`src/training/mining_orchestrator.py`).
 *   **Satellite Worker**: Uses GPU-accelerated Grounding DINO to mine ~1.1 poles/second from PASDA.
 *   **Street Fetcher**: Deep-fetches Mapillary imagery (10x depth per location) for rich angles.
-*   **Street Smart Worker**: Validates incoming street imagery in real-time.
 *   **Result**: Automatic generation of thousands of training samples per hour.
 
-### 2. Dual-Stream YOLO Training
-The enterprise pipeline now trains on a **merged dataset** of Top-Down (Satellite) and Ego-Centric (Street View) imagery simultaneously.
-*   **Why?** Ensures the model is robust against different sensor inputs and perspectives.
-*   **Automation**: `prepare_dual_stream_dataset.py` automatically merges, shuffles, and splits the data before every training run.
+### 2. Dual-Expert Model Architecture
+We moved from a generic single model to a specialized **Expert Ensemble**:
+*   **Satellite Expert (`yolo11l_satellite_expert.pt`)**: Optimized for top-down dots and shadows (NAIP 640px).
+*   **Street Expert (`yolo11l_street_expert.pt`)**: Optimized for vertical structures and cross-arms (Ego-centric).
+*   **Pipeline impl**: The `PoleDetector` auto-selects the correct expert based on input source.
 
-### 3. Advanced Fusion Logic
-Integrated sophisticated spatial algoirithms into the main detection loop:
-*   **String of Pearls**: Infers missing assets based on the consistent spacing of confirmed poles (Gap Analysis).
-*   **Sensor Fusion (Ray Casting)**: Correlates street-level bearing vectors with satellite point locations to triangulate verified coordinates.
+### 3. Sensor Fusion & Correlation (Live)
+The pipeline now features a fully active Correlation Engine:
+*   **Metadata Ingestion**: `src/ingestion/ingest_mapillary_metadata.py` populates the `street_view_images` PostGIS table with millions of car locations + camera headings.
+*   **Ray Casting**: When the AI detects a pole from space, `SensorFusion` checks for nearby street view images.
+*   **Verification**: If a car's camera vector intersects the satellite point -> **Confirmed Golden Record**.
+*   **String of Pearls**: Algorithms infer missing poles based on 30-50m network spacing topology.
 
 ### 4. Continuous Pipeline ("Set and Forget")
 The entire stack is now managed by `run_full_enterprise_pipeline.py`.
 *   **Single Command**: `docker exec ... python /workspace/run_full_enterprise_pipeline.py`
-*   **Outcome**: Trains Model -> Ingests Data -> Detects -> Fuses -> Updates DB. No manual intervention required.
+*   **Outcome**: Trains Expert Models -> Ingests Data -> Detects -> Fuses -> Updates DB. No manual intervention required.

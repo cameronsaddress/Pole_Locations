@@ -93,60 +93,68 @@ def main():
     else:
         logger.info("⏭️  Skipping Data Integrity Check (User Request).")
 
-    # --- STEP 1: TRAIN YOLO11 (Dual-Stream) ---
+    # --- STEP 1: TRAIN YOLO11 (Dual-Expert) ---
     if not args.skip_train:
-        logger.info("--- [STEP 1/4] Training YOLO11l Model (Dual-Stream) ---")
+        logger.info("--- [STEP 1/4] Training YOLO11l Specialist Models (Dual-Expert) ---")
         
-        # 1. Generate Dataset YAML
-        logger.info("Generating Dual-Stream Dataset YAML...")
+        # 1. Train Satellite Expert
+        logger.info("Training Satellite Expert Model...")
         
-        # Create helper script if it doesn't exist (simpler than inline)
-        yaml_script = """
+        # Gen YAML for Sat
+        with open("src/utils/gen_sat_yaml.py", "w") as f:
+            f.write("""
 import yaml
-import os
 from pathlib import Path
+import os
+
+# Create dir if not exists (for sat expert)
+Path('/workspace/data/training/satellite_expert').mkdir(parents=True, exist_ok=True)
 
 data = {
-    'path': '/workspace/data/training/unified_dataset',
-    'train': 'images/train',
-    'val': 'images/val',
+    'path': '/workspace/data/training/satellite_expert',
+    'train': 'images/train', 
+    'val': 'images/val', 
     'nc': 1,
     'names': ['utility_pole']
 }
 
-Path('/workspace/data/training/unified_dataset').mkdir(parents=True, exist_ok=True)
-with open('/workspace/data/training/unified_dataset/dataset.yaml', 'w') as f:
+with open('/workspace/data/training/satellite_expert/dataset.yaml', 'w') as f:
     yaml.dump(data, f)
-print("YAML Generated.")
-"""
-        with open("src/utils/gen_yaml.py", "w") as f:
-            f.write(yaml_script)
-            
-        run_command("python3 src/utils/gen_yaml.py")
-        
-        # 2. Prepare Data (Merge Sat + Street)
-        # We need a script to shuffle and split the data into train/val
-        logger.info("Merging Satellite and Street datasets...")
-        merge_cmd = "python3 src/utils/prepare_dual_stream_dataset.py" 
-        # (We need to create this script, or we can inline it if simple)
-        # For now, assuming we will create it.
-        run_command(merge_cmd)
 
-        # 3. Train
-        train_cmd = (
+print("YAML Generated.")
+""")
+        # Actually, let's just make a new preparation script that splits BOTH properly.
+        # We will assume 'src/utils/prepare_expert_datasets.py' is created.
+        logger.info("Preparing Expert Datasets...")
+        run_command("python3 src/utils/prepare_expert_datasets.py")
+
+        # Train Sat
+        run_command(
             "yolo detect train "
             "model=yolo11l.pt "
-            "data=/workspace/data/training/unified_dataset/dataset.yaml "
+            "data=/workspace/data/training/satellite_expert/dataset.yaml "
             "epochs=50 "
-            "imgsz=640 " # Increased to 640 for better small object detection
-            "batch=16 "
-            "workers=8 "
+            "imgsz=640 "
             "project=/workspace/models/checkpoints "
-            "name=yolo11l_dual_stream "
+            "name=yolo11l_satellite_expert "
             "device=0 "
             "exist_ok=True"
         )
-        run_command(train_cmd)
+        
+        # 2. Train Street Expert
+        logger.info("Training Street Expert Model...")
+        run_command(
+            "yolo detect train "
+            "model=yolo11l.pt "
+            "data=/workspace/data/training/street_expert/dataset.yaml "
+            "epochs=50 "
+            "imgsz=640 " # Street view benefits from higher Res, maybe 1280? sticking to 640 for speed/parity
+            "project=/workspace/models/checkpoints "
+            "name=yolo11l_street_expert "
+            "device=0 "
+            "exist_ok=True"
+        )
+        
     else:
         logger.info("⏭️  Skipping Training (User Request). Using existing checkpoints.")
     
