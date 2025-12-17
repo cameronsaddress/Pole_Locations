@@ -351,82 +351,15 @@ export default function LiveMap() {
                   }}
                   radius={zoomLevel < 13 ? 3 : 6}
                >
-                  {selectedPole && selectedPole.id === pole.id && (
-                     <Popup
-                        className="cyber-popup p-0 border-none bg-transparent"
-                        closeButton={false}
-                        minWidth={350}
-                        maxWidth={350}
-                        offset={[0, 50]}
-                     >
-                        <Card className="w-[350px] border-cyan-500/50 bg-black/90 backdrop-blur-xl text-white">
-                           <CardHeader className="py-2 border-b border-white/10">
-                              <CardTitle className=" text-sm flex items-center justify-between">
-                                 <span className="text-cyan-400 font-mono">{pole.id}</span>
-                                 <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${pole.status === 'Verified' ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'
-                                    }`}>{pole.status}</span>
-                              </CardTitle>
-                           </CardHeader>
-                           <CardContent className="p-0">
-                              <Tabs defaultValue={pole.mapillary_key ? "mapillary" : "satellite"} className="w-full">
-                                 <TabsList className="w-full rounded-none bg-white/5 border-b border-white/10 grid grid-cols-3">
-                                    <TabsTrigger value="mapillary">Mapillary</TabsTrigger>
-                                    <TabsTrigger value="satellite">Satellite</TabsTrigger>
-                                    <TabsTrigger value="google">Google</TabsTrigger>
-                                 </TabsList>
-
-                                 <div className="h-64 bg-black relative">
-                                    <TabsContent value="mapillary" className="m-0 h-full p-2">
-                                       {pole.mapillary_key ? (
-                                          <MapillaryImage imageKey={pole.mapillary_key} />
-                                       ) : (
-                                          <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs">
-                                             <Maximize2 className="w-8 h-8 mb-2 opacity-50" />
-                                             No Mapillary Data
-                                          </div>
-                                       )}
-                                    </TabsContent>
-
-                                    <TabsContent value="satellite" className="m-0 h-full">
-                                       <img
-                                          src={getTileUrl(pole.lat, pole.lng, 19)}
-                                          className="w-full h-full object-cover"
-                                       />
-                                       {/* Overlays */}
-                                       <div className="absolute inset-0 border-[20px] border-black/20 pointer-events-none rounded-none" />
-                                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 border-2 border-cyan-500 rounded-full animate-pulse shadow-[0_0_15px_rgba(34,211,238,0.5)]" />
-                                    </TabsContent>
-
-                                    <TabsContent value="google" className="m-0 h-full p-2 flex flex-col items-center justify-center">
-                                       <a
-                                          href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pole.lat},${pole.lng}`}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded text-sm transition-colors text-white no-underline"
-                                       >
-                                          <ExternalLink className="w-4 h-4" />
-                                          Open Google Street View
-                                       </a>
-                                       <p className="text-[10px] text-gray-500 mt-2 text-center max-w-[200px]">
-                                          Google Embed API requires Key. Click to open in new tab.
-                                       </p>
-                                    </TabsContent>
-                                 </div>
-
-                                 {/* Footer Info */}
-                                 <div className="p-3 bg-white/5 border-t border-white/10 flex justify-between items-center text-xs font-mono">
-                                    <span className="text-gray-400">CONF: {(pole.confidence * 100).toFixed(0)}%</span>
-                                    <span className="text-gray-400">{pole.lat.toFixed(5)}, {pole.lng.toFixed(5)}</span>
-                                 </div>
-                              </Tabs>
-                           </CardContent>
-                        </Card>
-                     </Popup>
-                  )}
+                  {/* No Popup Here - Handled Globally */}
                </CircleMarker>
             ))}
 
          </MapContainer>
+
+         {/* GLOBAL MODAL RENDERED HERE */}
+         <AssetDetailsModal pole={selectedPole} onClose={() => setSelectedPole(null)} />
+
       </div>
    )
 }

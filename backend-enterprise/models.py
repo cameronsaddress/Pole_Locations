@@ -88,5 +88,8 @@ class StreetViewImage(SQLModel, table=True):
     captured_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
+    # Annotation Status: pending, annotated, skipped
+    status: str = Field(default="pending")
+    
     class Config:
         arbitrary_types_allowed = True

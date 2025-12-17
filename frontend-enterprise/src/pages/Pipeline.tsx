@@ -58,7 +58,7 @@ export default function Pipeline() {
         }
 
         const fetchLogs = () => {
-             fetch(`${apiHost}/api/v2/pipeline/logs?lines=50`)
+            fetch(`${apiHost}/api/v2/pipeline/logs?lines=50`)
                 .then(res => res.json())
                 .then(data => {
                     if (data.logs) {
@@ -305,16 +305,29 @@ export default function Pipeline() {
                                 </div>
                                 <div>
                                     <h3 className="font-bold text-lg text-white">Full Enterprise Run</h3>
-                                    <p className="text-sm text-gray-400">Execute End-to-End: Integrity → Train → Detect → Fuse.</p>
+                                    <p className="text-sm text-gray-400">Execute End-to-End: Mine → Integrity → Train → Detect → Fuse.</p>
                                 </div>
                             </div>
-                            <Button
-                                disabled={!!activeStage}
-                                onClick={() => runJob('full_pipeline')}
-                                className="bg-white text-black hover:bg-gray-200 font-bold"
-                            >
-                                <Play className="w-4 h-4 mr-2" /> RUN ALL
-                            </Button>
+
+                            <div className="flex gap-4 items-center">
+                                {/* Reuse Mining Counties or use new state? Let's use miningCounties as 'New Targets' */}
+                                <RegionPickerModal
+                                    mode="mining"
+                                    datasets={datasets}
+                                    selected={miningCounties}
+                                    onSelectionChange={setMiningCounties}
+                                    triggerText={miningCounties.length ? `${miningCounties.length} Regions` : "Select Regions..."}
+                                    disabled={!!activeStage}
+                                />
+
+                                <Button
+                                    disabled={!!activeStage}
+                                    onClick={() => runJob('full_pipeline', { targets: miningCounties })}
+                                    className="bg-white text-black hover:bg-gray-200 font-bold"
+                                >
+                                    <Play className="w-4 h-4 mr-2" /> RUN ALL
+                                </Button>
+                            </div>
                         </CardContent>
                     </Card>
 

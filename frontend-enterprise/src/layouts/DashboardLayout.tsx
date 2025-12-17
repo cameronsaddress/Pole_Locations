@@ -7,16 +7,19 @@ import {
     Settings,
     Menu,
     Server,
-    Activity
+    Activity,
+    Disc,
+    Target
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
 const sidebarItems = [
     { icon: LayoutDashboard, label: "Overview", path: "/" },
-    { icon: Map, label: "Live Map", path: "/map" },
+    { icon: Activity, label: "Live Map", path: "/map" },
     { icon: Database, label: "Data Assets", path: "/data" },
-    { icon: Activity, label: "Training", path: "/training" },
+    { icon: Disc, label: "Pipeline", path: "/training" },
+    { icon: Target, label: "Mn. Annotation", path: "/annotation" },
     { icon: Settings, label: "Settings", path: "/settings" },
 ]
 

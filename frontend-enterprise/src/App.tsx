@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard"
 import LiveMap3D from "./pages/LiveMap3D"
 import DataAssets from "./pages/DataAssets"
 import Pipeline from "./pages/Pipeline" // Replaced Training
+import Annotation from "./pages/Annotation" // New Manual Annotation
 import Settings from "./pages/Settings"
 
 const queryClient = new QueryClient()
@@ -19,6 +20,7 @@ function App() {
             <Route path="map" element={<LiveMap3D />} />
             <Route path="data" element={<DataAssets />} />
             <Route path="training" element={<Pipeline />} />
+            <Route path="annotation" element={<Annotation />} />
             <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>

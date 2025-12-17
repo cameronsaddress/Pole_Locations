@@ -35,27 +35,75 @@ class PipelineManager:
                 return "available"
             return "supported" # Default if not on disk
 
-        # Define Catalogue
+        # Define Catalogue with Geospatial Metadata
         catalogue = {
             "Pennsylvania": [
-                {"id": "dauphin_pa", "name": "Dauphin County"},
-                {"id": "cumberland_pa", "name": "Cumberland County"},
-                {"id": "york_pa", "name": "York County"},
-                {"id": "adams_pa", "name": "Adams County"},
-                {"id": "allegheny_pa", "name": "Allegheny County"},
-                {"id": "philadelphia_pa", "name": "Philadelphia County"},
+                {
+                    "id": "dauphin_pa", "name": "Dauphin County (Harrisburg)", 
+                    "center": [-76.88, 40.27], "zoom": 11,
+                    "bbox": {"min_lat": 39.90, "max_lat": 40.50, "min_lng": -77.20, "max_lng": -76.20}
+                },
+                {
+                    "id": "philadelphia_pa", "name": "Philadelphia County",
+                    "center": [-75.16, 39.95], "zoom": 11,
+                    "bbox": {"min_lat": 39.85, "max_lat": 40.15, "min_lng": -75.30, "max_lng": -74.90}
+                },
+                {
+                    "id": "cumberland_pa", "name": "Cumberland County",
+                    "center": [-77.20, 40.15], "zoom": 10,
+                    "bbox": {"min_lat": 39.90, "max_lat": 40.30, "min_lng": -77.60, "max_lng": -76.90}
+                },
+                {
+                    "id": "york_pa", "name": "York County",
+                    "center": [-76.73, 39.96], "zoom": 10,
+                    "bbox": {"min_lat": 39.70, "max_lat": 40.20, "min_lng": -77.00, "max_lng": -76.40}
+                },
+                {
+                    "id": "adams_pa", "name": "Adams County",
+                    "center": [-77.21, 39.82], "zoom": 10,
+                    "bbox": {"min_lat": 39.70, "max_lat": 40.00, "min_lng": -77.50, "max_lng": -77.00}
+                },
+                {
+                    "id": "allegheny_pa", "name": "Allegheny County (Pittsburgh)",
+                    "center": [-80.00, 40.44], "zoom": 11,
+                    "bbox": {"min_lat": 40.20, "max_lat": 40.70, "min_lng": -80.35, "max_lng": -79.70}
+                },
             ],
             "Washington": [
-                {"id": "spokane_wa", "name": "Spokane County"},
-                {"id": "king_wa", "name": "King County (Seattle)"},
-                {"id": "snohomish_wa", "name": "Snohomish County"},
-                {"id": "pierce_wa", "name": "Pierce County"},
+                {
+                    "id": "king_wa", "name": "King County (Seattle)",
+                    "center": [-122.33, 47.60], "zoom": 11,
+                    "bbox": {"min_lat": 47.45, "max_lat": 47.75, "min_lng": -122.45, "max_lng": -122.20}
+                },
+                {
+                    "id": "spokane_wa", "name": "Spokane County",
+                    "center": [-117.42, 47.65], "zoom": 10,
+                    "bbox": {"min_lat": 47.40, "max_lat": 48.00, "min_lng": -117.80, "max_lng": -117.00}
+                },
+                {
+                    "id": "snohomish_wa", "name": "Snohomish County",
+                    "center": [-122.00, 48.00], "zoom": 9,
+                    "bbox": {"min_lat": 47.75, "max_lat": 48.30, "min_lng": -122.40, "max_lng": -121.50}
+                },
+                {
+                    "id": "pierce_wa", "name": "Pierce County",
+                    "center": [-122.10, 47.05], "zoom": 9,
+                    "bbox": {"min_lat": 46.70, "max_lat": 47.40, "min_lng": -122.60, "max_lng": -121.80}
+                },
             ],
             "New York": [
-                 {"id": "new_york_ny", "name": "New York City"},
+                 {
+                    "id": "new_york_ny", "name": "New York City",
+                    "center": [-74.00, 40.71], "zoom": 11,
+                    "bbox": {"min_lat": 40.50, "max_lat": 40.90, "min_lng": -74.30, "max_lng": -73.70}
+                },
             ],
              "Oregon": [
-                 {"id": "multnomah_or", "name": "Multnomah County (Portland)"},
+                 {
+                    "id": "multnomah_or", "name": "Multnomah County (Portland)",
+                    "center": [-122.67, 45.51], "zoom": 11,
+                    "bbox": {"min_lat": 45.40, "max_lat": 45.70, "min_lng": -122.90, "max_lng": -122.30}
+                 },
             ]
         }
 
@@ -66,7 +114,10 @@ class PipelineManager:
                 datasets[state].append({
                     "id": c["id"],
                     "name": c["name"],
-                    "status": get_status(c["id"])
+                    "status": get_status(c["id"]),
+                    "center": c.get("center"),
+                    "zoom": c.get("zoom"),
+                    "bbox": c.get("bbox")
                 })
         
         return datasets
@@ -175,6 +226,11 @@ class PipelineManager:
         # 6. FULL PIPELINE
         elif job_type == "full_pipeline":
              cmd = base_cmd + ["python3", "/workspace/run_full_enterprise_pipeline.py"]
+             
+             targets = params.get("targets", [])
+             if targets:
+                 target_str = ",".join(targets)
+                 cmd += ["--mining-targets", target_str]
 
         else:
             raise ValueError(f"Unknown job type: {job_type}")

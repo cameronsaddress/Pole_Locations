@@ -11,8 +11,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ExpertDatprep")
 
 # Config
-SAT_SRC = Path("data/training/satellite_smart_drops")
-STREET_SRC = Path("data/training/street_smart_drops")
+# Config - Updated for Manual Feed (Human Verified)
+SAT_SRC = Path("data/training/satellite_drops")
+STREET_SRC = Path("data/training/layer1_drops")
 
 SAT_DEST = Path("data/training/satellite_expert")
 STREET_DEST = Path("data/training/street_expert")
@@ -47,15 +48,32 @@ def create_yaml(base_dir):
 
 def process_dataset(src, dest):
     logger.info(f"Processing expert dataset: {src} -> {dest}")
+    
+    # Source structure verification
+    src_images = src / "images"
+    src_labels = src / "labels"
+    
+    if not src_images.exists():
+        logger.warning(f"Source images dir missing: {src_images}")
+        return
+
     img_t, img_v, lbl_t, lbl_v = setup_dirs(dest)
     create_yaml(dest)
     
-    images = list(src.glob("*.jpg"))
+    images = list(src_images.glob("*.jpg"))
     pairs = []
+    
     for img in images:
-        lbl = img.with_suffix(".txt")
+        # Check for corresponding label in labels dir
+        lbl = src_labels / img.with_suffix(".txt").name
+        
+        # KEY CHANGE: Only include if label exists and is NOT empty/skipped
         if lbl.exists():
-            pairs.append((img, lbl))
+            # Optional: Check for 'skipped' content or empty content if using that convention
+            if lbl.stat().st_size > 0:
+                 pairs.append((img, lbl))
+            
+    logger.info(f"Found {len(pairs)} labeled images in {src.name} (from {len(images)} total).")
             
     random.shuffle(pairs)
     split_idx = int(len(pairs) * (1 - VAL_SPLIT))

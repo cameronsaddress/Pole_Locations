@@ -9,3 +9,4 @@ passlib[bcrypt]
 geoalchemy2
 shapely
 numpy<2.0.0
+requests

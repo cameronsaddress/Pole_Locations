@@ -133,6 +133,54 @@ class GridConnector:
         
         return results.tolist()
 
+def fetch_osm_poles(bbox, output_path):
+    """
+    Fetches utility poles from OSM for a given bbox and saves to output_path.
+    bbox format: {'minx': float, 'miny': float, 'maxx': float, 'maxy': float}
+    """
+    query = f"""
+    [out:json][timeout:60];
+    (
+      node["power"="pole"]({bbox['miny']},{bbox['minx']},{bbox['maxy']},{bbox['maxx']});
+      node["power"="tower"]({bbox['miny']},{bbox['minx']},{bbox['maxy']},{bbox['maxx']});
+    );
+    out geom;
+    """
+    
+    try:
+        logger.info(f"Fetching OSM Poles for bbox: {bbox}...")
+        response = requests.post(OVERPASS_URL, data={'data': query})
+        response.raise_for_status()
+        data = response.json()
+        
+        features = []
+        for element in data.get('elements', []):
+            if element['type'] == 'node':
+                features.append({
+                    "type": "Feature",
+                    "properties": element.get("tags", {"id": str(element['id'])}),
+                    "geometry": { "type": "Point", "coordinates": [element['lon'], element['lat']] }
+                })
+                
+        if not features:
+            logger.warning(f"No poles found in OSM for this area.")
+            return False
+
+        fc = {"type": "FeatureCollection", "features": features}
+        gdf = gpd.GeoDataFrame.from_features(fc, crs="EPSG:4326")
+        
+        # Ensure parent dir exists
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        gdf.to_file(output_path, driver="GeoJSON")
+        logger.info(f"✅ Generated Grid File ({len(gdf)} poles) at {output_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"OSM Fetch Failed: {e}")
+        return False
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     fetch_grid_backbone()

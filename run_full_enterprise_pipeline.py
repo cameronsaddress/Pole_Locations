@@ -55,10 +55,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-train", action="store_true", help="Skip YOLO training and use existing weights")
     parser.add_argument("--skip-integrity", action="store_true", help="Skip Data Integrity/Repair check (e.g. if running separately)")
+    parser.add_argument("--mining-targets", type=str, help="Comma-separated list of targets to mine before training (e.g. 'york_pa,king_wa')")
+    # Parse only known args to avoid conflicts if needed, or just parse_args
     # Parse only known args to avoid conflicts if needed, or just parse_args
     args, unknown = parser.parse_known_args()
     
-    # --- PRE-FLIGHT CHECK: DATA INTEGRITY ---
+    # --- STEP 0: DATA MINING (Optional) ---
+    if hasattr(args, 'mining_targets') and args.mining_targets:
+        targets_list = args.mining_targets.split(',')
+        logger.info(f"--- [STEP 0/4] Mining New Regions: {targets_list} ---")
+        
+        # We call the mining script directly
+        mine_cmd = f"python src/training/mine_grid_for_labels.py --targets {args.mining_targets}"
+        run_command(mine_cmd)
+        
+        logger.info("✅ Mining Complete. New datasets should be available.")
+    else:
+        logger.info("⏭️  Skipping Mining (No targets provided).")
     if not args.skip_integrity:
         logger.info("--- [PRE-FLIGHT] Checking Data Integrity ---")
         
@@ -161,11 +174,16 @@ print("YAML Generated.")
     # --- STEP 2: INFERENCE & FULL PIPELINE ---
     logger.info("--- [STEP 2/4] Running Enterprise Pipeline on PA Counties ---")
     
-    target_dirs = [
-        "/workspace/data/imagery/naip_multi_county/osm_poles_dauphin_pa",
-        "/workspace/data/imagery/naip_multi_county/osm_poles_york_pa",
-        "/workspace/data/imagery/naip_multi_county/osm_poles_cumberland_pa"
-    ]
+    # Dynamic Discovery of Targets
+    base_data_dir = Path("/workspace/data/imagery/naip_multi_county")
+    target_dirs = []
+    if base_data_dir.exists():
+        target_dirs = [str(p) for p in base_data_dir.iterdir() if p.is_dir()] # and p.name.startswith("osm_poles_")]
+    
+    if not target_dirs:
+         logger.warning("No datasets found in naip_multi_county. Defaulting to empty list.")
+    else:
+         logger.info(f"Discovered {len(target_dirs)} target datasets: {[Path(t).name for t in target_dirs]}")
     
     # Verify dirs exist inside container view
     dirs_arg = " ".join(target_dirs)

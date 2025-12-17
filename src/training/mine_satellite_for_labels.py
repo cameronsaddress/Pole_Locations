@@ -34,11 +34,12 @@ TILE_SERVER_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Im
 ZOOM_LEVEL = 19 # Reverting to 19 (high res) to ensure coverage. 20 was too deep for ESRI in this area.
 
 # Paths
+# Paths
 INPUT_GRID = Path("data/processed/grid_backbone.geojson")
 if not INPUT_GRID.exists():
     INPUT_GRID = Path("frontend-enterprise/public/pole_network_v2.geojson")
 
-OUTPUT_DIR = Path("data/training/satellite_drops")
+OUTPUT_DIR = Path("/data/training/satellite_drops")
 IMAGES_DIR = OUTPUT_DIR / "images"
 LABELS_DIR = OUTPUT_DIR / "labels"
 
@@ -153,12 +154,17 @@ def mine_satellite():
             fname = f"{pid}_SAT.jpg"
             with open(IMAGES_DIR / fname, "wb") as f:
                 f.write(img_bytes)
-                           # Calculate exact pixel location for the label
-            px, py = lat_lon_to_pixel_in_tile(lat, lon, ZOOM_LEVEL)
-            label = generate_sat_yolo_label(px, py)
+                           
+            # For Manual Annotation Feed, we do NOT want to auto-label.
+            # We want the user to click.
+            # However, we could save a "proposal" if the UI supported it.
+            # For now, we just skip writing the label file so it appears as "Pending".
             
-            with open(LABELS_DIR / f"{pid}_SAT.txt", "w") as f:
-                f.write(label)
+            # px, py = lat_lon_to_pixel_in_tile(lat, lon, ZOOM_LEVEL)
+            # label = generate_sat_yolo_label(px, py)
+            # 
+            # with open(LABELS_DIR / f"{pid}_SAT.txt", "w") as f:
+            #     f.write(label)
                 
             success_count += 1
             

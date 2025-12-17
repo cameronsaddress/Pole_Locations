@@ -180,14 +180,29 @@ def run_detection_service(limit: int = 1000, target_path: str = None):
                                         confirmed = sensor_fusion.verify_visually(session, img.image_key, street_model)
                                         if confirmed:
                                             # Upgrade Pole Status to 'Confirmed' or add tag
-                                            # We need to find the POLE associated with this detection.
-                                            # FusionEngine created it. We don't have the ID easy here.
-                                            # We can update the Detection tag
                                             det.tags['visual_confirmation'] = True
                                             det.tags['confirmed_by_image'] = img.image_key
                                             session.add(det)
-                                            # Ideally update the Pole too.
-                                            logger.info(f"    🌟 VISUAL CONFIRMATION SUCCESS for Detection {det.id}")
+                                            
+                                            # Find and Update the Parent POLE (created by FusionEngine earlier)
+                                            # We use a tight spatial match since Fusion just ran.
+                                            from models import Pole
+                                            parent_pole = session.exec(
+                                                select(Pole).where(
+                                                    Pole.location.ST_DWithin(det.location, 2.0) # 2 meter tolerance
+                                                ).limit(1)
+                                            ).first()
+                                            
+                                            if parent_pole:
+                                                parent_pole.status = "Verified"
+                                                if parent_pole.tags is None: parent_pole.tags = {}
+                                                parent_pole.tags['confirmed_by_image'] = img.image_key
+                                                parent_pole.tags['visual_confirmation'] = True
+                                                parent_pole.tags['sensors'] = parent_pole.tags.get('sensors', []) + ['Street View']
+                                                session.add(parent_pole)
+                                                logger.info(f"    🌟 VISUAL CONFIRMATION SUCCESS for Detection {det.id} -> Pole {parent_pole.pole_id}")
+                                            else:
+                                                logger.warning(f"    ⚠️ Could not find parent pole for confirmed detection {det.id}")
                                             
                                     break # Stop after first confirming image
                                     

@@ -39,7 +39,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(ops.router)
 app.include_router(training.router, prefix="/api/v2/training")
 app.include_router(work_orders.router)
+app.include_router(work_orders.router)
 app.include_router(pipeline.router)
+from routers import annotation
+app.include_router(annotation.router, prefix="/api/v2/annotation")
 
 # --- WEBSOCKETS ---
 @app.websocket("/ws/training")

@@ -64,6 +64,7 @@ services:
       DATABASE_URL: postgresql://pole_user:pole_secure_password@polevision-db:5432/polevision
       DATA_DIR: /data
       MODELS_DIR: /models
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
     ports:
       - "8000:8000"
     depends_on:
