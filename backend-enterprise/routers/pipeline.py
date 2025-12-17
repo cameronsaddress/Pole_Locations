@@ -32,3 +32,8 @@ def get_pipeline_logs(lines: int = 50):
     """Fetch recent logs from the pipeline execution."""
     logs = PipelineManager.get_logs(lines)
     return {"logs": logs}
+
+@router.get("/status")
+def get_pipeline_status():
+    """Get status of current or last job."""
+    return PipelineManager.get_job_status()

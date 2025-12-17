@@ -31,38 +31,38 @@ const getTileUrl = (lat: number, lng: number, zoom: number) => {
 
 // Component to fetch and display Mapillary Image
 const MapillaryImage = ({ imageKey }: { imageKey: string }) => {
-    const [imageUrl, setImageUrl] = useState<string | null>(null)
-    const [loading, setLoading] = useState(true)
+   const [imageUrl, setImageUrl] = useState<string | null>(null)
+   const [loading, setLoading] = useState(true)
 
-    useEffect(() => {
-        if (!imageKey) return
-        
-        const token = import.meta.env.VITE_MAPILLARY_TOKEN
-        if (!token) return
+   useEffect(() => {
+      if (!imageKey) return
 
-        fetch(`https://graph.mapillary.com/${imageKey}?access_token=${token}&fields=thumb_2048_url`)
-            .then(res => res.json())
-            .then(data => {
-                if (data.thumb_2048_url) setImageUrl(data.thumb_2048_url)
-                setLoading(false)
-            })
-            .catch(err => {
-                console.error("Mapillary fetch error:", err)
-                setLoading(false)
-            })
-    }, [imageKey])
+      const token = import.meta.env.VITE_MAPILLARY_TOKEN
+      if (!token) return
 
-    if (loading) return <div className="h-48 flex items-center justify-center text-cyan-500 animate-pulse">Loading Mapillary...</div>
-    if (!imageUrl) return <div className="h-48 flex items-center justify-center text-gray-500">Image Unavailable</div>
+      fetch(`https://graph.mapillary.com/${imageKey}?access_token=${token}&fields=thumb_2048_url`)
+         .then(res => res.json())
+         .then(data => {
+            if (data.thumb_2048_url) setImageUrl(data.thumb_2048_url)
+            setLoading(false)
+         })
+         .catch(err => {
+            console.error("Mapillary fetch error:", err)
+            setLoading(false)
+         })
+   }, [imageKey])
 
-    return (
-        <div className="relative w-full h-64 bg-black rounded-lg overflow-hidden border border-cyan-500/30 group">
-             <img src={imageUrl} className="w-full h-full object-cover" />
-             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                 <a href={`https://www.mapillary.com/app/?pKey=${imageKey}`} target="_blank" className="text-white text-xs underline">Open in Mapillary</a>
-             </div>
-        </div>
-    )
+   if (loading) return <div className="h-48 flex items-center justify-center text-cyan-500 animate-pulse">Loading Mapillary...</div>
+   if (!imageUrl) return <div className="h-48 flex items-center justify-center text-gray-500">Image Unavailable</div>
+
+   return (
+      <div className="relative w-full h-64 bg-black rounded-lg overflow-hidden border border-cyan-500/30 group">
+         <img src={imageUrl} className="w-full h-full object-cover" />
+         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <a href={`https://www.mapillary.com/app/?pKey=${imageKey}`} target="_blank" className="text-white text-xs underline">Open in Mapillary</a>
+         </div>
+      </div>
+   )
 }
 
 // Map Controller for data fetching and view interactions
@@ -84,13 +84,10 @@ const MapController = ({
       fetch('/pa_counties.geojson')
          .then(res => res.json())
          .then(data => {
-            // Filter features where STATE val is '42' (PA) or properties.STATE is '42'
-            // The plotly dataset uses id as FIPS. PA counties start with 42.
-            // Filter features where STATE val is '42' (PA) AND matches our data coverage
-            const SUPPORTED_COUNTIES = ['Dauphin', 'York', 'Cumberland']
+            // Filter features where STATE val is '42' (PA)
+            // We want to show ALL PA counties for context, but only highlight Supported ones in Cyan
             const paFeatures = data.features.filter((f: any) =>
-               f.id && f.id.startsWith('42') &&
-               SUPPORTED_COUNTIES.includes(f.properties.NAME)
+               f.id && f.id.startsWith('42')
             );
             setCounties({ ...data, features: paFeatures });
          })
@@ -143,7 +140,6 @@ const MapController = ({
    // Zoom/Move Listeners
    useMapEvents({
       zoomend: () => {
-         // setZoomLevel(map.getZoom()) // Removed, now handled by MapEventsHandler
          const z = map.getZoom()
          // If user zooms out to State View (approx 8 or lower), reset focus mode
          if (z < 8) {
@@ -152,7 +148,6 @@ const MapController = ({
          fetchVisibleAssets()
       },
       moveend: () => {
-         // Debounce fetch
          const handler = setTimeout(() => {
             fetchVisibleAssets()
          }, 500)
@@ -174,6 +169,19 @@ const MapController = ({
          });
       }
 
+      // Check if Supported
+      const SUPPORTED_COUNTIES = ['Dauphin', 'York', 'Cumberland']
+      const isSupported = SUPPORTED_COUNTIES.includes(feature.properties.NAME)
+
+      // Initial Style
+      layer.setStyle({
+         weight: isSupported ? 2 : 1,
+         color: isSupported ? '#22d3ee' : '#475569', // Cyan for supported, Slate-600 for others
+         fillColor: '#0f172a',
+         fillOpacity: isSupported ? 0.1 : 0.05,
+         dashArray: isSupported ? null : '4'
+      })
+
       layer.on({
          mouseover: (e: any) => {
             const layer = e.target;
@@ -185,72 +193,69 @@ const MapController = ({
          },
          mouseout: (e: any) => {
             const layer = e.target;
-            // Revert to default style (Teal)
+            // Revert to default style
             layer.setStyle({
-               weight: 1,
-               color: '#22d3ee', // Cyan/Teal border
-               fillOpacity: 0.1
+               weight: isSupported ? 2 : 1,
+               color: isSupported ? '#22d3ee' : '#475569',
+               fillOpacity: isSupported ? 0.1 : 0.05
             });
          },
          click: (e: any) => {
-            setIsFocused(true) // Enable focused mode to show dots even if zoom is slightly low
+            // Only focus on Supported counties for asset fetching? 
+            // Or allow clicking any to zoom in? Let's allow zooming in.
+            setIsFocused(true)
             map.fitBounds(e.target.getBounds(), { padding: [20, 20] });
-            // The moveend/zoomend event will trigger fetchVisibleAssets
          }
       });
    }
 
    // 1. Zoom/Move Logic
-   // No special zoom logic for poles needed, just fetch on move
-   // But we need to make sure we fetch if we just zoomed in
    useEffect(() => {
       fetchVisibleAssets()
-   }, [zoomLevel]) // Re-fetch when zoom level changes (especially crossing the 11 threshold)
-
-   useEffect(() => {
-      // Force refresh of counties style on mount/update to ensure labels
-      if (counties) {
-         // Leaflet handles this via React binding usually
-      }
-   }, [counties])
+   }, [zoomLevel])
 
    return (
       <>
-         {/* Show Counties if Zoom < 11 */}
-         {zoomLevel < 11 && counties && (
+         {/* Show Counties if Zoom < 12 */}
+         {zoomLevel < 12 && counties && (
             <GeoJSON
                data={counties}
-               style={{
-                  color: '#22d3ee', // Cyan Border (Default)
-                  weight: 1,
-                  fillColor: '#0f172a', // Dark fill
-                  fillOpacity: 0.1
-               }}
                onEachFeature={onEachCounty}
             />
          )}
 
-         {/* State Label - Only on very high level zoom */}
+         {/* State Label Layer */}
          {zoomLevel < 9 && (
-            <CircleMarker center={[40.9, -77.8]} pathOptions={{ stroke: false, fill: false }}>
-               <Popup
-                  closeButton={false}
-                  autoClose={false}
-                  closeOnEscapeKey={false}
-                  closeOnClick={false}
-                  className="state-label-popup"
-                  offset={[0, 0]}
-               >
-                  <span className="text-white/30 text-6xl font-black tracking-[0.5em] uppercase select-none pointer-events-none drop-shadow-xl" style={{ fontFamily: 'Inter, sans-serif' }}>
-                     Pennsylvania
-                  </span>
-               </Popup>
-            </CircleMarker>
+            <>
+               <StateLabel position={[40.9, -77.8]} name="Pennsylvania" />
+               <StateLabel position={[42.6, -75.5]} name="New York" />
+               <StateLabel position={[39.0, -76.8]} name="Maryland" />
+               <StateLabel position={[40.1, -82.9]} name="Ohio" />
+               <StateLabel position={[38.8, -80.5]} name="West Virginia" />
+               <StateLabel position={[40.0, -74.5]} name="New Jersey" />
+            </>
          )}
 
       </>
    )
 }
+
+const StateLabel = ({ position, name }: { position: [number, number], name: string }) => (
+   <CircleMarker center={position} pathOptions={{ stroke: false, fill: false }} radius={0}>
+      <Popup
+         closeButton={false}
+         autoClose={false}
+         closeOnEscapeKey={false}
+         closeOnClick={false}
+         className="state-label-popup"
+         offset={[0, 0]}
+      >
+         <span className="text-white/30 text-4xl md:text-6xl font-black tracking-[0.2em] uppercase select-none pointer-events-none drop-shadow-xl whitespace-nowrap" style={{ fontFamily: 'Inter, sans-serif' }}>
+            {name}
+         </span>
+      </Popup>
+   </CircleMarker>
+)
 
 export default function LiveMap() {
    const [assets, setAssets] = useState<Asset[]>([])
@@ -355,67 +360,66 @@ export default function LiveMap() {
                         offset={[0, 50]}
                      >
                         <Card className="w-[350px] border-cyan-500/50 bg-black/90 backdrop-blur-xl text-white">
-                            <CardHeader className="py-2 border-b border-white/10">
-                                <CardTitle className=" text-sm flex items-center justify-between">
-                                    <span className="text-cyan-400 font-mono">{pole.id}</span>
-                                    <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
-                                        pole.status === 'Verified' ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'
+                           <CardHeader className="py-2 border-b border-white/10">
+                              <CardTitle className=" text-sm flex items-center justify-between">
+                                 <span className="text-cyan-400 font-mono">{pole.id}</span>
+                                 <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${pole.status === 'Verified' ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'
                                     }`}>{pole.status}</span>
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="p-0">
-                                <Tabs defaultValue={pole.mapillary_key ? "mapillary" : "satellite"} className="w-full">
-                                    <TabsList className="w-full rounded-none bg-white/5 border-b border-white/10 grid grid-cols-3">
-                                        <TabsTrigger value="mapillary">Mapillary</TabsTrigger>
-                                        <TabsTrigger value="satellite">Satellite</TabsTrigger>
-                                        <TabsTrigger value="google">Google</TabsTrigger>
-                                    </TabsList>
-                                    
-                                    <div className="h-64 bg-black relative">
-                                        <TabsContent value="mapillary" className="m-0 h-full p-2">
-                                            {pole.mapillary_key ? (
-                                                <MapillaryImage imageKey={pole.mapillary_key} />
-                                            ) : (
-                                                <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs">
-                                                    <Maximize2 className="w-8 h-8 mb-2 opacity-50" />
-                                                    No Mapillary Data
-                                                </div>
-                                            )}
-                                        </TabsContent>
-                                        
-                                        <TabsContent value="satellite" className="m-0 h-full">
-                                            <img
-                                                 src={getTileUrl(pole.lat, pole.lng, 19)}
-                                                 className="w-full h-full object-cover"
-                                            />
-                                            {/* Overlays */}
-                                            <div className="absolute inset-0 border-[20px] border-black/20 pointer-events-none rounded-none"/>
-                                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 border-2 border-cyan-500 rounded-full animate-pulse shadow-[0_0_15px_rgba(34,211,238,0.5)]"/>
-                                        </TabsContent>
+                              </CardTitle>
+                           </CardHeader>
+                           <CardContent className="p-0">
+                              <Tabs defaultValue={pole.mapillary_key ? "mapillary" : "satellite"} className="w-full">
+                                 <TabsList className="w-full rounded-none bg-white/5 border-b border-white/10 grid grid-cols-3">
+                                    <TabsTrigger value="mapillary">Mapillary</TabsTrigger>
+                                    <TabsTrigger value="satellite">Satellite</TabsTrigger>
+                                    <TabsTrigger value="google">Google</TabsTrigger>
+                                 </TabsList>
 
-                                        <TabsContent value="google" className="m-0 h-full p-2 flex flex-col items-center justify-center">
-                                            <a
-                                                href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pole.lat},${pole.lng}`}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded text-sm transition-colors text-white no-underline"
-                                            >
-                                                <ExternalLink className="w-4 h-4" />
-                                                Open Google Street View
-                                            </a>
-                                            <p className="text-[10px] text-gray-500 mt-2 text-center max-w-[200px]">
-                                                Google Embed API requires Key. Click to open in new tab.
-                                            </p>
-                                        </TabsContent>
-                                    </div>
-                                    
-                                    {/* Footer Info */}
-                                    <div className="p-3 bg-white/5 border-t border-white/10 flex justify-between items-center text-xs font-mono">
-                                        <span className="text-gray-400">CONF: {(pole.confidence * 100).toFixed(0)}%</span>
-                                        <span className="text-gray-400">{pole.lat.toFixed(5)}, {pole.lng.toFixed(5)}</span>
-                                    </div>
-                                </Tabs>
-                            </CardContent>
+                                 <div className="h-64 bg-black relative">
+                                    <TabsContent value="mapillary" className="m-0 h-full p-2">
+                                       {pole.mapillary_key ? (
+                                          <MapillaryImage imageKey={pole.mapillary_key} />
+                                       ) : (
+                                          <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs">
+                                             <Maximize2 className="w-8 h-8 mb-2 opacity-50" />
+                                             No Mapillary Data
+                                          </div>
+                                       )}
+                                    </TabsContent>
+
+                                    <TabsContent value="satellite" className="m-0 h-full">
+                                       <img
+                                          src={getTileUrl(pole.lat, pole.lng, 19)}
+                                          className="w-full h-full object-cover"
+                                       />
+                                       {/* Overlays */}
+                                       <div className="absolute inset-0 border-[20px] border-black/20 pointer-events-none rounded-none" />
+                                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 border-2 border-cyan-500 rounded-full animate-pulse shadow-[0_0_15px_rgba(34,211,238,0.5)]" />
+                                    </TabsContent>
+
+                                    <TabsContent value="google" className="m-0 h-full p-2 flex flex-col items-center justify-center">
+                                       <a
+                                          href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pole.lat},${pole.lng}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded text-sm transition-colors text-white no-underline"
+                                       >
+                                          <ExternalLink className="w-4 h-4" />
+                                          Open Google Street View
+                                       </a>
+                                       <p className="text-[10px] text-gray-500 mt-2 text-center max-w-[200px]">
+                                          Google Embed API requires Key. Click to open in new tab.
+                                       </p>
+                                    </TabsContent>
+                                 </div>
+
+                                 {/* Footer Info */}
+                                 <div className="p-3 bg-white/5 border-t border-white/10 flex justify-between items-center text-xs font-mono">
+                                    <span className="text-gray-400">CONF: {(pole.confidence * 100).toFixed(0)}%</span>
+                                    <span className="text-gray-400">{pole.lat.toFixed(5)}, {pole.lng.toFixed(5)}</span>
+                                 </div>
+                              </Tabs>
+                           </CardContent>
                         </Card>
                      </Popup>
                   )}

@@ -45,7 +45,7 @@ export default function Pipeline() {
     const [logs, setLogs] = useState<LogMessage[]>([])
     const logsEndRef = useRef<HTMLDivElement>(null)
 
-    // Polling for logs
+    // Polling for Status & Logs
     useEffect(() => {
         const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
 
@@ -57,28 +57,53 @@ export default function Pipeline() {
                 .catch(err => console.error("Failed to load datasets", err))
         }
 
+        const fetchLogs = () => {
+             fetch(`${apiHost}/api/v2/pipeline/logs?lines=50`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.logs) {
+                        const lines = data.logs.split('\n').filter(Boolean)
+                        const newLogs = lines.map((l: string, i: number) => ({
+                            timestamp: new Date().toLocaleTimeString(), // Simple timestamp (mock)
+                            message: l,
+                            type: l.toLowerCase().includes('error') ? 'error' : 'info' as 'info' | 'error'
+                        }))
+                        // Basic dedup check could go here if needed
+                        setLogs(newLogs)
+                    }
+                })
+        }
+
         // Initial Fetch
         fetchDatasets()
 
-        // Log Poller
-        const interval = setInterval(() => {
-            if (activeStage) {
-                // Also refresh datasets periodically to check for mining completion
-                fetchDatasets()
+        // Status Poller
+        const interval = setInterval(async () => {
+            try {
+                // 1. Check Backend Status
+                const res = await fetch(`${apiHost}/api/v2/pipeline/status`)
+                const status = await res.json()
 
-                fetch(`${apiHost}/api/v2/pipeline/logs?lines=50`)
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.logs) {
-                            const lines = data.logs.split('\n').filter(Boolean)
-                            const newLogs = lines.map((l: string) => ({
-                                timestamp: new Date().toLocaleTimeString(),
-                                message: l,
-                                type: l.toLowerCase().includes('error') ? 'error' : 'info'
-                            }))
-                            setLogs(newLogs)
-                        }
-                    })
+                if (status.is_running) {
+                    // Sync State: If running but frontend thinks idle, updating frontend
+                    if (activeStage !== status.job_type) {
+                        setActiveStage(status.job_type)
+                    }
+                    // Fetch Logs while running
+                    fetchLogs()
+                } else {
+                    // Job Not Running
+                    if (activeStage) {
+                        // We think it's running, but backend says it's done.
+                        // Transition: Running -> Done
+                        console.log("Job finished, refreshing state...")
+                        setActiveStage(null)
+                        fetchDatasets() // Refresh datasets (vital for mining)
+                        fetchLogs() // Get final logs
+                    }
+                }
+            } catch (err) {
+                console.error("Status check failed", err)
             }
         }, 1000)
 

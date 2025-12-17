@@ -71,11 +71,46 @@ class PipelineManager:
         
         return datasets
 
+    _active_job = None  # { "type": str, "process": Popen, "start_time": float }
+
+    @staticmethod
+    def get_job_status() -> Dict[str, Any]:
+        """
+        Returns the status of the currently running job, if any.
+        """
+        job = PipelineManager._active_job
+        if job is None:
+            return {"is_running": False, "status": "idle", "job_type": None}
+        
+        # Check if process is still running
+        retcode = job["process"].poll()
+        if retcode is None:
+            return {
+                "is_running": True, 
+                "status": "running", 
+                "job_type": job["type"],
+                "start_time": job["start_time"]
+            }
+        else:
+            # Process finished
+            PipelineManager._active_job = None # Clear it
+            status = "completed" if retcode == 0 else "failed"
+            return {
+                "is_running": False, 
+                "status": status, 
+                "job_type": job["type"],
+                "exit_code": retcode
+            }
+
     @staticmethod
     def run_job(job_type: str, params: Dict[str, Any]) -> int:
         """
         Executes a pipeline step inside the GPU container via Docker.
         """
+        # 1. Check if job already running
+        if PipelineManager._active_job and PipelineManager._active_job["process"].poll() is None:
+             raise ValueError(f"A job ({PipelineManager._active_job['type']}) is already running.")
+
         base_cmd = ["docker", "exec", "polevision-gpu"]
         cmd = []
         
@@ -162,6 +197,13 @@ class PipelineManager:
             stdout=log_file,
             stderr=subprocess.STDOUT
         )
+        
+        import time
+        PipelineManager._active_job = {
+            "type": job_type,
+            "process": process,
+            "start_time": time.time()
+        }
             
         return process.pid
 
