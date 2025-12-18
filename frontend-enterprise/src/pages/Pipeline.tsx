@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react"
+import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Play, Terminal, Activity, Database, Layers, FileText, Cpu, Zap } from "lucide-react";
+import { Activity, Database, Disc, Zap, AlertTriangle, FileText, Search, Play, Layers, Cpu, Terminal } from 'lucide-react';
 import { RegionPickerModal } from "@/components/RegionPickerModal"
 
 // Types
@@ -34,37 +35,36 @@ export default function Pipeline() {
     const [logs, setLogs] = useState<LogMessage[]>([])
     const logsEndRef = useRef<HTMLDivElement>(null)
 
+    const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+
+    const fetchDatasets = () => {
+        fetch(`${apiHost}/api/v2/pipeline/datasets`)
+            .then(res => res.json())
+            .then(data => setDatasets(data))
+            .catch(err => console.error("Failed to load datasets", err))
+    }
+
+    const fetchLogs = () => {
+        fetch(`${apiHost}/api/v2/pipeline/logs?lines=200`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.logs) {
+                    const lines = data.logs.split('\n').filter(Boolean)
+                    const newLogs = lines.map((l: string) => ({
+                        timestamp: new Date().toLocaleTimeString(),
+                        message: l,
+                        type: l.toLowerCase().includes('error') ? 'error' : 'info' as 'info' | 'error'
+                    }))
+                    setLogs(newLogs)
+                }
+            })
+    }
+
     // Polling for Status & Logs
     useEffect(() => {
-        const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
-
-        // Load Datasets
-        const fetchDatasets = () => {
-            fetch(`${apiHost}/api/v2/pipeline/datasets`)
-                .then(res => res.json())
-                .then(data => setDatasets(data))
-                .catch(err => console.error("Failed to load datasets", err))
-        }
-
-        const fetchLogs = () => {
-            fetch(`${apiHost}/api/v2/pipeline/logs?lines=50`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data.logs) {
-                        const lines = data.logs.split('\n').filter(Boolean)
-                        const newLogs = lines.map((l: string) => ({
-                            timestamp: new Date().toLocaleTimeString(), // Simple timestamp (mock)
-                            message: l,
-                            type: l.toLowerCase().includes('error') ? 'error' : 'info' as 'info' | 'error'
-                        }))
-                        // Basic dedup check could go here if needed
-                        setLogs(newLogs)
-                    }
-                })
-        }
-
         // Initial Fetch
         fetchDatasets()
+        fetchLogs()
 
         // Status Poller
         const interval = setInterval(async () => {
@@ -122,6 +122,14 @@ export default function Pipeline() {
         }
     }
 
+    const stopJob = async () => {
+        const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+        try {
+            await fetch(`${apiHost}/api/v2/pipeline/stop`, { method: 'POST' })
+            setLogs(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), message: "🛑 Stopping Job...", type: 'error' }])
+        } catch (e) { console.error(e) }
+    }
+
     return (
         <div className="space-y-6 pb-20">
             {/* Header */}
@@ -151,7 +159,7 @@ export default function Pipeline() {
                                     </div>
                                     <div>
                                         <h3 className="font-bold text-lg text-white">Stage 1: Data Mining & Ingestion</h3>
-                                        <p className="text-sm text-gray-400">Mine Satellite/Street Images → DINO Segmentation → Generate Bounding Boxes.</p>
+                                        <p className="text-sm text-gray-400">Fetch Grid/OSM Data → Download Street View Images → Register for Annotation.</p>
                                     </div>
                                 </div>
                                 <Button
@@ -190,7 +198,7 @@ export default function Pipeline() {
                                 </div>
                                 <div>
                                     <h3 className="font-bold text-lg text-white">Stage 2: Target Datasets (Active)</h3>
-                                    <p className="text-sm text-gray-400">Select processed datasets to be used in downstream Training and Inference.</p>
+                                    <p className="text-sm text-gray-400">Select processed datasets for downstream Inference Runs.</p>
                                 </div>
                             </div>
 
@@ -285,50 +293,73 @@ export default function Pipeline() {
                         </CardContent>
                     </Card>
 
-                    {/* MASTER ACTION */}
-                    <Card className={`border-2 border-dashed ${activeStage === 'full_pipeline' ? 'border-cyan-500 bg-cyan-950/10' : 'border-gray-700 bg-black/20'}`}>
-                        <CardContent className="p-4 flex items-center justify-between">
-                            <div className="flex gap-4 items-center">
-                                <div className="p-3 rounded-full bg-white/10 text-white">
-                                    <Activity className="w-6 h-6" />
+                    {/* 6. FULL RUN ORCHESTRATOR */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.5 }}
+                        className="mt-8 relative"
+                    >
+                        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-transparent blur-xl" />
+                        <Card className="bg-black/80 border-blue-500/30 relative overflow-hidden">
+                            <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(59,130,246,0.05)_50%,transparent_75%)] bg-[length:250%_250%] animate-[gradient_8s_linear_infinite]" />
+                            <CardContent className="p-6 flex items-center justify-between relative z-10">
+                                <div className="flex items-center gap-6">
+                                    <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                                        <Activity className="w-8 h-8" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-xl font-black text-white uppercase tracking-widest flex items-center gap-3">
+                                            Run Regional Extraction
+                                            {activeStage && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded border border-blue-500/30 animate-pulse">Running</span>}
+                                        </h2>
+                                        <p className="text-gray-400 font-mono text-sm mt-1">
+                                            Execute End-to-End: Integrity → Detect → Fuse on <span className="text-blue-400">{selectedCounties.length > 0 ? selectedCounties.join(', ') : 'ALL'}</span> targets.
+                                        </p>
+                                        <div className="text-xs text-gray-500 italic mt-1">
+                                            Uses current model weights. Training skipped by default.
+                                        </div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h3 className="font-bold text-lg text-white">Full Enterprise Run</h3>
-                                    <p className="text-sm text-gray-400">Execute End-to-End: Mine → Integrity → Train → Detect → Fuse.</p>
+
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2 px-4 py-2 rounded bg-white/5 border border-white/10">
+                                        <span className="text-xs text-gray-400 font-mono">TARGETS:</span>
+                                        <span className="text-sm font-bold text-white">{selectedCounties.length > 0 ? selectedCounties.length : 'ALL'}</span>
+                                    </div>
+
+                                    {activeStage ? (
+                                        <Button
+                                            className="bg-red-600 hover:bg-red-700 text-white font-bold h-12 px-8 uppercase tracking-widest shadow-lg shadow-red-500/20 transition-all duration-200"
+                                            onClick={() => stopJob()}
+                                        >
+                                            STOP
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-12 px-8 uppercase tracking-widest shadow-lg shadow-blue-500/20 transition-all duration-200"
+                                            onClick={() => runJob('full_pipeline', { targets: selectedCounties })}
+                                        >
+                                            START EXTRACTION
+                                        </Button>
+                                    )}
                                 </div>
-                            </div>
-
-                            <div className="flex gap-4 items-center">
-                                {/* Reuse Mining Counties or use new state? Let's use miningCounties as 'New Targets' */}
-                                <RegionPickerModal
-                                    mode="mining"
-                                    datasets={datasets}
-                                    selected={miningCounties}
-                                    onSelectionChange={setMiningCounties}
-                                    triggerText={miningCounties.length ? `${miningCounties.length} Regions` : "Select Regions..."}
-                                    disabled={!!activeStage}
-                                />
-
-                                <Button
-                                    disabled={!!activeStage}
-                                    onClick={() => runJob('full_pipeline', { targets: miningCounties })}
-                                    className="bg-white text-black hover:bg-gray-200 font-bold"
-                                >
-                                    <Play className="w-4 h-4 mr-2" /> RUN ALL
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
+                            </CardContent>
+                        </Card>
+                    </motion.div>
 
                 </div>
 
                 {/* RIGHT COLUMN: LOGS */}
                 <div className="col-span-4">
                     <Card className="h-full bg-black border-primary/20 flex flex-col">
-                        <CardHeader className="py-3 border-b border-primary/10 bg-muted/10">
+                        <CardHeader className="py-3 border-b border-primary/10 bg-muted/10 flex flex-row items-center justify-between">
                             <CardTitle className="text-sm flex items-center text-green-500 font-mono">
                                 <Terminal className="mr-2 h-4 w-4" /> Live Console Output
                             </CardTitle>
+                            <Button variant="ghost" size="sm" onClick={fetchLogs} className="h-6 w-8 p-0 hover:bg-white/10" title="Refresh Logs">
+                                <FileText className="h-3 w-3 text-gray-400" />
+                            </Button>
                         </CardHeader>
                         <CardContent className="p-0 flex-1 relative">
                             <div className="absolute inset-0 overflow-y-auto p-4 font-mono text-xs space-y-1">

@@ -13,6 +13,13 @@ interface AnnotationStats {
     skipped: number;
 }
 
+interface RecentItem {
+    image_id: string;
+    filename: string;
+    image_url: string;
+    boxes: Array<{ x: number, y: number, w: number, h: number }>;
+}
+
 const Annotation = () => {
     const [stats, setStats] = useState<AnnotationStats | null>(null);
     const [currentImage, setCurrentImage] = useState<any>(null);
@@ -29,6 +36,16 @@ const Annotation = () => {
     const imageRef = useRef<HTMLImageElement>(null);
 
     const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`;
+
+    const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
+
+    const fetchRecent = async () => {
+        try {
+            const res = await fetch(`${apiHost}/api/v2/annotation/recent?dataset=${dataset}&limit=12`);
+            const data = await res.json();
+            setRecentItems(data);
+        } catch (e) { console.error(e); }
+    };
 
     const fetchStats = async () => {
         try {
@@ -80,6 +97,7 @@ const Annotation = () => {
 
     useEffect(() => {
         fetchNext();
+        fetchRecent();
     }, [dataset]);
 
     // Annotations State (Top-Left X/Y, W/H)
@@ -175,6 +193,7 @@ const Annotation = () => {
         });
 
         fetchNext();
+        fetchRecent();
     };
 
     const handleSkip = async () => {
@@ -407,6 +426,42 @@ const Annotation = () => {
                             </div>
                         </CardContent>
                     </Card>
+                </div>
+            </div>
+
+            {/* Recent Carousel */}
+            <div className="space-y-4 pt-8 border-t border-gray-800">
+                <h2 className="text-xl font-bold text-white">Recently Annotated</h2>
+                <div className="flex gap-4 overflow-x-auto pb-4">
+                    {recentItems.map((item) => (
+                        <Card key={item.image_id} className="min-w-[200px] w-[200px] bg-gray-900 border-gray-800 shrink-0">
+                            <CardContent className="p-2">
+                                <div className="relative aspect-square bg-black rounded overflow-hidden">
+                                    <img
+                                        src={`${apiHost}${item.image_url}`}
+                                        className="w-full h-full object-cover opacity-80"
+                                        alt={item.filename}
+                                    />
+                                    {item.boxes.map((box, i) => (
+                                        <div
+                                            key={i}
+                                            className="absolute border border-green-400 bg-green-400/30"
+                                            style={{
+                                                left: `${(box.x - box.w / 2) * 100}%`,
+                                                top: `${(box.y - box.h / 2) * 100}%`,
+                                                width: `${box.w * 100}%`,
+                                                height: `${box.h * 100}%`
+                                            }}
+                                        />
+                                    ))}
+                                </div>
+                                <div className="mt-2 text-[10px] text-gray-500 truncate font-mono">
+                                    {item.image_id}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ))}
+                    {recentItems.length === 0 && <div className="text-gray-600 italic p-2">No recent annotations found.</div>}
                 </div>
             </div>
         </div>

@@ -308,3 +308,41 @@ def annotate_with_llm(image_id: str, dataset: str = "street"):
             return
             
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+@router.get("/recent")
+def get_recent_annotations(dataset: str = "street", limit: int = 10):
+    _, lbl_dir, _ = get_dataset_paths(dataset)
+    
+    if not lbl_dir.exists():
+        return []
+        
+    # Get all txt files sorted by modification time (newest first)
+    files = list(lbl_dir.glob("*.txt"))
+    # Sort by mtime
+    files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    files = files[:limit]
+    
+    results = []
+    for p in files:
+        image_id = p.stem
+        # Read boxes
+        boxes = []
+        try:
+            with open(p, "r") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 5:
+                        # YOLO: class x y w h
+                        cls, x, y, w, h = map(float, parts[:5])
+                        boxes.append({"x": x, "y": y, "w": w, "h": h})
+        except:
+            pass
+            
+        results.append({
+            "image_id": image_id,
+            "filename": f"{image_id}.jpg", 
+            "image_url": f"/api/v2/pipeline/serve_image/{image_id}.jpg?dataset={dataset}",
+            "boxes": boxes
+        })
+        
+    return results

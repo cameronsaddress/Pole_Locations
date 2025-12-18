@@ -53,6 +53,7 @@ from config import (  # type: ignore
     DETECTION_LAT_OFFSET_DEG,
     DETECTION_LON_OFFSET_DEG,
     OUTPUTS_DIR,
+    ENABLE_ZERO_SHOT_CLASSIFICATION,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -156,7 +157,7 @@ class PoleDetector:
             "bird nest on utility pole"
         ]
         
-        if HAS_TRANSFORMERS:
+        if HAS_TRANSFORMERS and ENABLE_ZERO_SHOT_CLASSIFICATION:
             try:
                 logger.info("Loading CLIP model for zero-shot classification...")
                 # device=0 for GPU, -1 for CPU

@@ -54,3 +54,14 @@ def get_pipeline_logs(lines: int = 50):
 def get_pipeline_status():
     """Get status of current or last job."""
     return PipelineManager.get_job_status()
+
+@router.post("/stop")
+def stop_pipeline_job():
+    """Stops the currently running pipeline job."""
+    stopped = PipelineManager.stop_job()
+    if stopped:
+        return {"status": "stopped", "message": "Job terminated successfully."}
+    else:
+        # even if not running, cleanup state
+        PipelineManager._active_job = None 
+        return {"status": "stopped", "message": "No active job was running."}

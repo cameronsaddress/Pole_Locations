@@ -47,6 +47,9 @@ MODEL_INPUT_SIZE = 640
 CONFIDENCE_THRESHOLD = float(os.getenv("DETECTION_CONFIDENCE_THRESHOLD", "0.25"))
 IOU_THRESHOLD = float(os.getenv("DETECTION_IOU_THRESHOLD", "0.45"))  # Intersection over Union for NMS
 
+# Classification Configuration
+ENABLE_ZERO_SHOT_CLASSIFICATION = os.getenv("ENABLE_ZERO_SHOT_CLASSIFICATION", "False").lower() == "true"
+
 # Detection geospatial calibration (degrees)
 DETECTION_LAT_OFFSET_DEG = float(os.getenv("DETECTION_LAT_OFFSET_DEG", "0.0"))
 DETECTION_LON_OFFSET_DEG = float(os.getenv("DETECTION_LON_OFFSET_DEG", "0.0"))

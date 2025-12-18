@@ -125,13 +125,43 @@ class PipelineManager:
     _active_job = None  # { "type": str, "process": Popen, "start_time": float }
 
     @staticmethod
+    def _check_docker_status() -> Dict[str, Any]:
+        """Fallback: Check running processes in Docker container."""
+        try:
+            # We look for key scripts
+            res = subprocess.run(["docker", "exec", "polevision-gpu", "ps", "aux"], capture_output=True, text=True)
+            output = res.stdout
+            
+            job_type = None
+            if "run_full_enterprise_pipeline.py" in output:
+                job_type = "full_pipeline"
+            elif "runner.py" in output:
+                job_type = "inference"
+            elif "yolo detect train" in output or ("python3" in output and "train" in output): 
+                job_type = "training"
+            elif "mine_grid_for_labels.py" in output:
+                job_type = "mining"
+                
+            if job_type:
+                 return {
+                    "is_running": True,
+                    "status": "running",
+                    "job_type": job_type,
+                    "start_time": 0
+                 }
+        except Exception as e:
+            logger.error(f"Failed to check docker status: {e}")
+            
+        return {"is_running": False, "status": "idle", "job_type": None}
+
+    @staticmethod
     def get_job_status() -> Dict[str, Any]:
         """
         Returns the status of the currently running job, if any.
         """
         job = PipelineManager._active_job
         if job is None:
-            return {"is_running": False, "status": "idle", "job_type": None}
+            return PipelineManager._check_docker_status()
         
         # Check if process is still running
         retcode = job["process"].poll()
@@ -162,7 +192,8 @@ class PipelineManager:
         if PipelineManager._active_job and PipelineManager._active_job["process"].poll() is None:
              raise ValueError(f"A job ({PipelineManager._active_job['type']}) is already running.")
 
-        base_cmd = ["docker", "exec", "polevision-gpu"]
+        # Force unbuffered python output for real-time logs
+        base_cmd = ["docker", "exec", "-e", "PYTHONUNBUFFERED=1", "polevision-gpu"]
         cmd = []
         
         # 1. DATA MINING (Stage 1)
@@ -223,14 +254,23 @@ class PipelineManager:
                 "--dirs"
             ] + target_paths
 
-        # 6. FULL PIPELINE
+        # 6. FULL PIPELINE (Now: Regional Extraction / Inference Run)
         elif job_type == "full_pipeline":
              cmd = base_cmd + ["python3", "/workspace/run_full_enterprise_pipeline.py"]
              
              targets = params.get("targets", [])
              if targets:
+                 # In this context (from UI "Active Datasets"), targets are for INFERENCE
                  target_str = ",".join(targets)
-                 cmd += ["--mining-targets", target_str]
+                 cmd += ["--inference-targets", target_str]
+             
+             # Support explicit training toggle
+             if params.get("train", False):
+                 cmd += ["--train"]
+                 
+             # Support mining targets (if we wanted to mine inside full run, unlikely now via UI but good for API)
+             if params.get("mining_targets"):
+                 cmd += ["--mining-targets", params.get("mining_targets")]
 
         else:
             raise ValueError(f"Unknown job type: {job_type}")
@@ -245,8 +285,8 @@ class PipelineManager:
         with open(log_file_path, "w") as f:
             f.write(f"--- STARTED JOB: {job_type} ---\n")
 
-        # Open in append mode for the process
-        log_file = open(log_file_path, "a")
+        # Open in append mode for the process (Line Buffered)
+        log_file = open(log_file_path, "a", buffering=1)
         
         process = subprocess.Popen(
             cmd,
@@ -262,6 +302,35 @@ class PipelineManager:
         }
             
         return process.pid
+
+    @staticmethod
+    def stop_job():
+        """Stops the currently running job."""
+        job = PipelineManager._active_job
+        # Also check actual docker status to catch orphaned jobs
+        status = PipelineManager._check_docker_status()
+        
+        if (job and job["process"].poll() is None) or status["is_running"]:
+            logger.info("Stopping job...")
+            
+            if job and job["process"].poll() is None:
+                 job["process"].terminate()
+            
+            # Force Kill inside container
+            try:
+                subprocess.run(["docker", "exec", "polevision-gpu", "pkill", "-f", "python3"], timeout=2)
+                subprocess.run(["docker", "exec", "polevision-gpu", "pkill", "-f", "yolo"], timeout=2)
+            except:
+                pass
+
+            PipelineManager._active_job = None
+            
+            # Log the stop
+            with open("/app/pipeline.log", "a") as f:
+                f.write("\n--- JOB STOPPED BY USER ---\n")
+                
+            return True
+        return False
 
     @staticmethod
     def get_logs(lines: int = 100) -> str:

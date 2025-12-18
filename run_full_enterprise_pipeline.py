@@ -52,12 +52,14 @@ def main():
     
     # Check flags
     import argparse
+    import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--skip-train", action="store_true", help="Skip YOLO training and use existing weights")
-    parser.add_argument("--skip-integrity", action="store_true", help="Skip Data Integrity/Repair check (e.g. if running separately)")
-    parser.add_argument("--mining-targets", type=str, help="Comma-separated list of targets to mine before training (e.g. 'york_pa,king_wa')")
-    # Parse only known args to avoid conflicts if needed, or just parse_args
-    # Parse only known args to avoid conflicts if needed, or just parse_args
+    # Logic Inversion: Default is SKIP training (Fast Path). Use --train to enforce training.
+    parser.add_argument("--train", action="store_true", help="Force YOLO training (defaults to using existing weights)")
+    parser.add_argument("--skip-integrity", action="store_true", help="Skip Data Integrity/Repair check")
+    parser.add_argument("--mining-targets", type=str, help="Comma-separated list of targets to mine")
+    parser.add_argument("--inference-targets", type=str, help="Comma-separated list of targets to run inference on (defaults to all)")
+    
     args, unknown = parser.parse_known_args()
     
     # --- STEP 0: DATA MINING (Optional) ---
@@ -107,7 +109,7 @@ def main():
         logger.info("⏭️  Skipping Data Integrity Check (User Request).")
 
     # --- STEP 1: TRAIN YOLO11 (Dual-Expert) ---
-    if not args.skip_train:
+    if args.train:
         logger.info("--- [STEP 1/4] Training YOLO11l Specialist Models (Dual-Expert) ---")
         
         # 1. Train Satellite Expert
@@ -177,19 +179,28 @@ print("YAML Generated.")
     # Dynamic Discovery of Targets
     base_data_dir = Path("/workspace/data/imagery/naip_multi_county")
     target_dirs = []
+    
     if base_data_dir.exists():
-        target_dirs = [str(p) for p in base_data_dir.iterdir() if p.is_dir()] # and p.name.startswith("osm_poles_")]
+        all_dirs = [str(p) for p in base_data_dir.iterdir() if p.is_dir()]
+        
+        # Filter if targets provided
+        if hasattr(args, 'inference_targets') and args.inference_targets:
+            whitelist = args.inference_targets.split(',')
+            # Normalize strings for matching
+            target_dirs = [d for d in all_dirs if any(w.strip() in Path(d).name for w in whitelist)]
+            logger.info(f"Targeting specific datasets ({len(target_dirs)}): {[Path(t).name for t in target_dirs]}")
+        else:
+            target_dirs = all_dirs
+            logger.info(f"Targeting ALL datasets ({len(target_dirs)})")
     
     if not target_dirs:
          logger.warning("No datasets found in naip_multi_county. Defaulting to empty list.")
-    else:
-         logger.info(f"Discovered {len(target_dirs)} target datasets: {[Path(t).name for t in target_dirs]}")
     
     # Verify dirs exist inside container view
     dirs_arg = " ".join(target_dirs)
     
     pipeline_cmd = (
-        f"python src/pipeline/runner.py "
+        f"python3 src/pipeline/runner.py "
         f"--dirs {dirs_arg}"
     )
     
