@@ -200,7 +200,7 @@ print("YAML Generated.")
     dirs_arg = " ".join(target_dirs)
     
     pipeline_cmd = (
-        f"python3 src/pipeline/runner.py "
+        f"python3 -m src.pipeline.runner "
         f"--dirs {dirs_arg}"
     )
     
