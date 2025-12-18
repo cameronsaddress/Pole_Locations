@@ -15,25 +15,31 @@ from src.config import PROCESSED_DATA_DIR, OUTPUTS_DIR
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def train_yolo(lr0, momentum, weight_decay, epochs, batch_size):
+def train_yolo(lr0, momentum, weight_decay, epochs, batch_size, dataset_name):
     """
     Run a single training trial with specific hyperparameters.
     """
-    logger.info(f"Starting YOLO11l Training Trial. LR={lr0}, Mom={momentum}, WD={weight_decay}")
+    logger.info(f"Starting YOLO11l Training Trial. Dataset={dataset_name} LR={lr0}, Mom={momentum}, WD={weight_decay}")
     
-    # Check for dataset
-    yaml_path = PROCESSED_DATA_DIR / 'pole_training_dataset' / 'dataset.yaml'
+    # Resolve Dataset Path
+    if dataset_name == "satellite":
+        yaml_path = Path("/workspace/data/training/satellite_expert/dataset.yaml")
+    elif dataset_name == "street":
+        yaml_path = Path("/workspace/data/training/street_expert/dataset.yaml")
+    else:
+        # Default/Legacy
+        yaml_path = PROCESSED_DATA_DIR / 'pole_training_dataset' / 'dataset.yaml'
+
     if not yaml_path.exists():
         logger.error(f"Dataset not found at {yaml_path}")
-        # Return dummy result if no data, to avoid crashing the whole loop
-        print(json.dumps({"error": "Dataset missing", "map50": 0.0, "box_loss": 0.0}))
+        print(json.dumps({"error": f"Dataset {dataset_name} missing at {yaml_path}", "map50": 0.0, "box_loss": 0.0}))
         return
 
     # Initialize model (YOLO11l)
     model = YOLO("yolo11l.pt") 
     
     # Project dir for this specific trial
-    project_dir = OUTPUTS_DIR / "tuning_trials"
+    project_dir = OUTPUTS_DIR / f"tuning_trials_{dataset_name}"
     run_name = f"trial_{int(time.time())}"
     
     # Define callback for live streaming
@@ -135,7 +141,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0.0005)
     parser.add_argument("--epochs", type=int, default=50) # Keep low for tuning
     parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--dataset", type=str, default="street")
     
     args = parser.parse_args()
     
-    train_yolo(args.lr0, args.momentum, args.weight_decay, args.epochs, args.batch)
+    train_yolo(args.lr0, args.momentum, args.weight_decay, args.epochs, args.batch, args.dataset)

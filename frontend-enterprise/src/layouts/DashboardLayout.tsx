@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Outlet, Link, useLocation } from "react-router-dom"
 import {
     LayoutDashboard,
-    Map,
+    // import { Map } from 'lucide-react'
     Database,
     Settings,
     Menu,

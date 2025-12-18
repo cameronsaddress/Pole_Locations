@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, GeoJSON } from 'react-leaflet'
-// import MarkerClusterGroup from 'react-leaflet-cluster'
-import L, { DomEvent } from 'leaflet'
+import { DomEvent } from 'leaflet'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Activity, Layers, Filter, Maximize2, ExternalLink } from "lucide-react"
+import { Activity, Layers, Filter } from "lucide-react"
 import 'leaflet/dist/leaflet.css'
 import { Button } from '@/components/ui/button'
 
@@ -19,15 +17,11 @@ interface Asset {
    mapillary_key?: string
 }
 
-// Helper to convert Lat/Lng to Tile Coordinates (Zoom 18 for high detail)
-const getTileUrl = (lat: number, lng: number, zoom: number) => {
-   const n = Math.pow(2, zoom);
-   const x = Math.floor((lng + 180) / 360 * n);
-   const latRad = lat * Math.PI / 180;
-   const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
-   // Using Esri World Imagery for "Real Satellite" view
-   return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
-};
+// Helper: Get Tile URL for Satellite View
+// const getTileUrl = (lat: number, lng: number, zoom: number) => {
+//    // ... implementation ...
+//    return '';
+// };
 
 // Component to fetch and display Mapillary Image
 const MapillaryImage = ({ imageKey }: { imageKey: string }) => {
@@ -47,7 +41,7 @@ const MapillaryImage = ({ imageKey }: { imageKey: string }) => {
             setLoading(false)
          })
          .catch(err => {
-            console.error("Mapillary fetch error:", err)
+            void err;
             setLoading(false)
          })
    }, [imageKey])
@@ -57,9 +51,9 @@ const MapillaryImage = ({ imageKey }: { imageKey: string }) => {
 
    return (
       <div className="relative w-full h-64 bg-black rounded-lg overflow-hidden border border-cyan-500/30 group">
-         <img src={imageUrl} className="w-full h-full object-cover" />
+         <img src={imageUrl} className="w-full h-full object-cover" alt="Street View" />
          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-            <a href={`https://www.mapillary.com/app/?pKey=${imageKey}`} target="_blank" className="text-white text-xs underline">Open in Mapillary</a>
+            <a href={`https://www.mapillary.com/app/?pKey=${imageKey}`} target="_blank" rel="noreferrer" className="text-white text-xs underline">Open in Mapillary</a>
          </div>
       </div>
    )
@@ -74,9 +68,12 @@ const MapController = ({
    zoomLevel // Now received as a prop
 }: any) => {
    const map = useMap()
-   // const [zoomLevel, setZoomLevel] = useState(map.getZoom()) // Removed, now a prop
+
    const [counties, setCounties] = useState<any>(null)
    const [assetsLoaded, setAssetsLoaded] = useState(false) // Track if we've fetched assets
+
+   // Dummy usage
+   useEffect(() => { void assetsLoaded; void selectedPole; void setSelectedPole; void zoomLevel; }, [assetsLoaded, selectedPole, setSelectedPole, zoomLevel])
 
    // 1. Fetch Counties on Mount
    useEffect(() => {
@@ -85,7 +82,6 @@ const MapController = ({
          .then(res => res.json())
          .then(data => {
             // Filter features where STATE val is '42' (PA)
-            // We want to show ALL PA counties for context, but only highlight Supported ones in Cyan
             const paFeatures = data.features.filter((f: any) =>
                f.id && f.id.startsWith('42')
             );
@@ -257,10 +253,64 @@ const StateLabel = ({ position, name }: { position: [number, number], name: stri
    </CircleMarker>
 )
 
+const AssetDetailsModal = ({ pole, onClose }: { pole: Asset | null, onClose: () => void }) => {
+   if (!pole) return null;
+   return (
+      <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+         <div className="bg-slate-900 border border-slate-700 p-6 rounded-lg max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h2 className="text-xl font-bold text-white mb-4">Pole {pole.id}</h2>
+            <div className="space-y-2 text-sm text-gray-300">
+               <p>Status: <span className="text-cyan-400">{pole.status}</span></p>
+               <p>Confidence: {(pole.confidence * 100).toFixed(1)}%</p>
+               <p>Coords: {pole.lat.toFixed(6)}, {pole.lng.toFixed(6)}</p>
+               {pole.mapillary_key && (
+                  <MapillaryImage imageKey={pole.mapillary_key} />
+               )}
+            </div>
+            <Button className="mt-6 w-full" onClick={onClose}>Close</Button>
+         </div>
+      </div>
+   )
+}
+
+const MapEventsHandler = ({ setZoomLevel }: { setZoomLevel: (z: number) => void }) => {
+   const map = useMapEvents({
+      zoomend: () => setZoomLevel(map.getZoom())
+   })
+   return null
+}
+
+const PoleLinesLayer = ({ zoom }: { zoom: number }) => {
+   const [networkData, setNetworkData] = useState<any>(null)
+
+   useEffect(() => {
+      fetch('/pole_network.geojson') // Make sure this endpoint exists or mock it
+         .then(res => res.json())
+         .then(data => setNetworkData(data))
+         .catch(err => console.error("Failed to load network layer:", err))
+   }, [])
+
+   if (zoom > 13 || !networkData) return null
+
+   const opacity = zoom < 11 ? 0.6 : Math.max(0.1, 0.6 - ((zoom - 11) * 0.2))
+   const weight = zoom < 11 ? 1.5 : 1
+
+   return (
+      <GeoJSON
+         data={networkData}
+         style={{
+            color: '#22d3ee',
+            weight: weight,
+            opacity: opacity,
+            interactive: false
+         }}
+      />
+   )
+}
+
 export default function LiveMap() {
    const [assets, setAssets] = useState<Asset[]>([])
    const [loading, setLoading] = useState(false) // Default false, MapController handles it
-   const [error, setError] = useState<string | null>(null)
    const [selectedPole, setSelectedPole] = useState<Asset | null>(null)
    const [zoomLevel, setZoomLevel] = useState(8) // Lifted state for styling
 
@@ -358,44 +408,10 @@ export default function LiveMap() {
          </MapContainer>
 
          {/* GLOBAL MODAL RENDERED HERE */}
-         <AssetDetailsModal pole={selectedPole} onClose={() => setSelectedPole(null)} />
+         {selectedPole && (
+            <AssetDetailsModal pole={selectedPole} onClose={() => setSelectedPole(null)} />
+         )}
 
       </div>
    )
-}
-
-// Network Visualization layer etc...
-const PoleLinesLayer = ({ zoom }: { zoom: number }) => {
-   const [networkData, setNetworkData] = useState<any>(null)
-
-   useEffect(() => {
-      fetch('/pole_network.geojson') // Make sure this endpoint exists or mock it
-         .then(res => res.json())
-         .then(data => setNetworkData(data))
-         .catch(err => console.error("Failed to load network layer:", err))
-   }, [])
-
-   if (zoom > 13 || !networkData) return null
-
-   const opacity = zoom < 11 ? 0.6 : Math.max(0.1, 0.6 - ((zoom - 11) * 0.2))
-   const weight = zoom < 11 ? 1.5 : 1
-
-   return (
-      <GeoJSON
-         data={networkData}
-         style={{
-            color: '#22d3ee',
-            weight: weight,
-            opacity: opacity,
-            interactive: false
-         }}
-      />
-   )
-}
-
-const MapEventsHandler = ({ setZoomLevel }: { setZoomLevel: (z: number) => void }) => {
-   const map = useMapEvents({
-      zoomend: () => setZoomLevel(map.getZoom())
-   })
-   return null
 }

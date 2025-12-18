@@ -78,10 +78,15 @@ def get_next_image(dataset: str = "street", session: Session = Depends(get_sessi
 def save_annotation(data: Dict[str, Any], session: Session = Depends(get_session)):
     """
     Saves the annotation.
-    Data: { "image_id": str, "box": {}, "dataset": "street" }
+    Data: { "image_id": str, "boxes": [{x,y,w,h}, ...], "dataset": "street" }
     """
     image_id = data["image_id"]
-    box = data["box"] 
+    boxes = data.get("boxes", [])
+    
+    # Backward compat for single box
+    if "box" in data:
+        boxes.append(data["box"])
+
     dataset = data.get("dataset", "street")
     
     _, lbl_dir, _ = get_dataset_paths(dataset)
@@ -89,10 +94,14 @@ def save_annotation(data: Dict[str, Any], session: Session = Depends(get_session
     
     label_path = lbl_dir / f"{image_id}.txt"
     with open(label_path, "w") as f:
-        # Class 0 = Pole
-        f.write(f"0 {box['x']} {box['y']} {box['w']} {box['h']}\n")
+        for box in boxes:
+            # Class 0 = Pole
+            # Ensure we have w/h defaults if just points are sent
+            w = box.get("w", 0.02)
+            h = box.get("h", 0.02)
+            f.write(f"0 {box['x']} {box['y']} {w} {h}\n")
         
-    return {"status": "saved"}
+    return {"status": "saved", "count": len(boxes)}
 
 @router.post("/skip")
 def skip_image(data: Dict[str, Any]):
@@ -218,7 +227,7 @@ def annotate_with_llm(image_id: str, dataset: str = "street"):
             return
             
         # 3. Construct Prompt
-        model = "google/gemini-2.0-flash-001"
+        model = "google/gemini-2.5-flash"
         yield json.dumps({"log": f"🤖 Model: {model}"}) + "\n"
         
         system_prompt = ""
@@ -232,12 +241,13 @@ Analyze this Street View image to detect UTILITY POLES.
 - If NO poles are clearly visible, return {"boxes": []}."""
         else:
             system_prompt = """You are an expert geospatial analyst.
-Analyze this Satellite Orthophoto to detect UTILITY POLES.
-- VISUAL CUES: Look for small circular/rectangular dots with distinct SHADOWS.
+Analyze this Satellite Orthophoto to detect the BASE of UTILITY POLES.
+- CRITICAL: Box ONLY the physical base of the pole (the small dot). Do NOT include the shadow in the bounding box.
+- VISUAL CUES: Look for the small dark circle/square where the pole touches the ground. The long shadow is a CLUE to find it, but exclude the shadow from the box.
 - CONTEXT: Usually located along roads or property lines.
 - OUTPUT: A JSON object with a list of bounding boxes.
 - FORMAT: {"boxes": [[x_center, y_center, width, height], ...]} (Normalized 0-1).
-- NOTE: Satellite poles are small. Bounding boxes should be tight (approx 0.02-0.05 size).
+- NOTE: Boxes should be very small and tight (approx 0.01-0.03).
 - If uncertain or no poles, return {"boxes": []}."""
 
         payload = {
@@ -273,9 +283,10 @@ Analyze this Satellite Orthophoto to detect UTILITY POLES.
             data = resp.json()
             content = data['choices'][0]['message']['content']
             yield json.dumps({"log": "📩 Response Received"}) + "\n"
+            yield json.dumps({"log": f"📝 Raw Output: {content[:200]}..."}) + "\n" # Added logging of raw content
             
-            # Clean Markdown wrappers
-            clean_content = content.replace("```json", "").replace("```", "").strip()
+            # Clean markdown
+            clean_content = re.sub(r"```json", "", content).replace("```", "").strip() # Modified cleaning
             result = json.loads(clean_content)
             
             boxes = result.get("boxes", [])

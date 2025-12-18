@@ -30,10 +30,21 @@ import math
 # or potentially USGS via MapProxy.
 # For simplicity and speed in this prototype: ESRI World Imagery via REST or standard Tile XYZ.
 
-TILE_SERVER_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-ZOOM_LEVEL = 19 # Reverting to 19 (high res) to ensure coverage. 20 was too deep for ESRI in this area.
+# PASDA PEMA 2018-2020 Statewide Orthoimagery (6-inch)
+# Best available high-res for PA (Confirmed 53KB+).
+WMS_URL = "https://imagery.pasda.psu.edu/arcgis/services/pasda/PEMAImagery2018_2020/MapServer/WMSServer"
+LAYER_NAME = "0"
 
-# Paths
+# Fallback/Primary logic
+# We want to fetch a bounding box (e.g. 50x50m or 40x40m) around the pole.
+# At 6-inch (0.15m) res: 40m = 266 pixels. 640px request = ~0.06m/px (upsampled) or larger area.
+# Let's request 640x640 pixels covering ~100m (0.15m/px * 640 = 96m).
+# 100m window is good for context.
+
+# 0.1524m/px * 640px ~= 97.5m
+METERS_PER_WINDOW = 97.5 
+PIXEL_WIDTH = 640
+
 # Paths
 INPUT_GRID = Path("data/processed/grid_backbone.geojson")
 if not INPUT_GRID.exists():
@@ -46,78 +57,67 @@ LABELS_DIR = OUTPUT_DIR / "labels"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SatMiner")
 
-def lat_lon_to_tile(lat, lon, zoom):
+def fetch_wms_bbox(lat, lon, pole_id):
     """
-    Standard Web Mercator projection to find tile coordinates.
+    Fetches a WMS Bounding Box centered on lat/lon.
     """
-    n = 2.0 ** zoom
-    xtile = int((lon + 180.0) / 360.0 * n)
-    ytile = int((1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n)
-    return xtile, ytile
-
-def lat_lon_to_pixel_in_tile(lat, lon, zoom):
-    """
-    Returns pixel offset (x, y) within the 256x256 tile.
-    Useful if we were cropping perfectly, but for now we just want the tile containing the pole.
-    Ideally, we center crop 640x640 from a stitched neighborhood of tiles.
-    """
-    n = 2.0 ** zoom
-    xtile = int((lon + 180.0) / 360.0 * n)
-    ytile = int((1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n)
-    
-    # Calculate global pixel coordinates
-    # Total pixels = 256 * n
-    # Current x pixel = ((lon + 180.0) / 360.0 * n) * 256
-    
-    x_float = (lon + 180.0) / 360.0 * n * 256.0
-    y_float = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n * 256.0
-    
-    # Local pixel in tile is (x_float % 256, y_float % 256)
-    pixel_x = x_float % 256.0
-    pixel_y = y_float % 256.0
-    
-    return pixel_x, pixel_y
-
-def fetch_satellite_tile(lat, lon, pole_id):
-    """
-    Fetches the satellite tile containing the pole.
-    In a real prod system, we would stitch 4 adjacent tiles and crop 640x640 center.
-    Here we grab the single tile for the speed of the prototype.
-    """
-    x, y = lat_lon_to_tile(lat, lon, ZOOM_LEVEL)
-    z = ZOOM_LEVEL
-    
-    url = TILE_SERVER_URL.format(z=z, x=x, y=y)
-    
     try:
-        # User-Agent strictly required by some tile servers
+        # 1. Calculate BBox (approx meters to degrees)
+        # 1 deg lat ~= 111,000 meters
+        # 1 deg lon ~= 111,000 * cos(lat) meters
+        
+        half_side_m = METERS_PER_WINDOW / 2.0
+        
+        lat_delta = half_side_m / 111132.0
+        lon_delta = half_side_m / (111132.0 * math.cos(math.radians(lat)))
+        
+        min_lon = lon - lon_delta
+        min_lat = lat - lat_delta
+        max_lon = lon + lon_delta
+        max_lat = lat + lat_delta
+        
+        bbox_str = f"{min_lon},{min_lat},{max_lon},{max_lat}"
+        
+        # WMS 1.1.1 is safer for axis order (always Lon, Lat)
+        params = {
+            "SERVICE": "WMS",
+            "VERSION": "1.1.1",
+            "REQUEST": "GetMap",
+            "BBOX": bbox_str,
+            "SRS": "EPSG:4326", 
+            "WIDTH": str(PIXEL_WIDTH),
+            "HEIGHT": str(PIXEL_WIDTH),
+            "LAYERS": LAYER_NAME,
+            "STYLES": "",
+            "FORMAT": "image/jpeg",
+        }
+        
+        # User-Agent strictly required
         headers = {"User-Agent": "PoleDetectorBot/1.0"}
-        resp = requests.get(url, headers=headers)
+        
+        # Requests will URL-encode params automatically
+        resp = requests.get(WMS_URL, params=params, headers=headers, timeout=10)
+        
         if resp.status_code == 200:
-            return True, resp.content
+            # Simple check if it's an image
+            if resp.headers.get("Content-Type", "").startswith("image"):
+                 return True, resp.content
+            else:
+                 logger.warning(f"WMS returned non-image: {resp.content[:100]}")
+                 return False, None
         else:
-            logger.warning(f"Failed tile fetch {z}/{x}/{y}: {resp.status_code}")
+            logger.warning(f"Failed WMS fetch {pole_id}: {resp.status_code} - {resp.text}")
             return False, None
+            
     except Exception as e:
         logger.error(f"Error fetching sat {pole_id}: {e}")
         return False, None
-
-def generate_sat_yolo_label(pixel_x, pixel_y):
-    """
-    Generate label based on exact pixel location.
-    YOLO expects normalized coordinates (0.0 to 1.0)
-    """
-    norm_x = pixel_x / 256.0
-    norm_y = pixel_y / 256.0
-    
-    # 0.02 is fairly small (approx 5 pixels width), good for aerial dots
-    return f"0 {norm_x:.6f} {norm_y:.6f} 0.02 0.02" 
 
 def mine_satellite():
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     LABELS_DIR.mkdir(parents=True, exist_ok=True)
     
-    logger.info(f"Loading grid for Satellite Mining...")
+    logger.info(f"Loading grid for High-Res PASDA Mining (PEMA 2018-2020)...")
     with open(INPUT_GRID) as f:
         data = json.load(f)
         
@@ -125,21 +125,18 @@ def mine_satellite():
     poles = [f for f in features if f["geometry"]["type"] == "Point"]
     
     # Filter out transmission towers if the data supports it
-    # We only want "distribution poles"
     dist_poles = []
     for p in poles:
         props = p.get("properties", {})
-        # Check power tag if available
         p_type = props.get("power", "pole")
-        # Explicitly skip towers
         if p_type != "tower":
             dist_poles.append(p)
             
-    logger.info(f"Filtered {len(poles) - len(dist_poles)} towers. Proceeding with {len(dist_poles)} distribution poles.")
+    logger.info(f"Proceeding with {len(dist_poles)} distribution poles.")
     
-    # Sample a subset to start building the dataset alongside the street view one
-    sample_poles = dist_poles[:2000] # Increased limit for distribution poles 
-    logger.info(f"Mining Satellite Imagery for {len(sample_poles)} locations...")
+    # Full Run
+    sample_poles = dist_poles 
+    logger.info(f"Mining High-Res Imagery for {len(sample_poles)} locations...")
     
     success_count = 0
     
@@ -148,28 +145,17 @@ def mine_satellite():
         lon, lat = coords[0], coords[1]
         pid = pole.get("properties", {}).get("id", f"pole_{i}")
         
-        ok, img_bytes = fetch_satellite_tile(lat, lon, pid)
+        ok, img_bytes = fetch_wms_bbox(lat, lon, pid)
         
         if ok:
             fname = f"{pid}_SAT.jpg"
             with open(IMAGES_DIR / fname, "wb") as f:
                 f.write(img_bytes)
-                           
-            # For Manual Annotation Feed, we do NOT want to auto-label.
-            # We want the user to click.
-            # However, we could save a "proposal" if the UI supported it.
-            # For now, we just skip writing the label file so it appears as "Pending".
-            
-            # px, py = lat_lon_to_pixel_in_tile(lat, lon, ZOOM_LEVEL)
-            # label = generate_sat_yolo_label(px, py)
-            # 
-            # with open(LABELS_DIR / f"{pid}_SAT.txt", "w") as f:
-            #     f.write(label)
-                
             success_count += 1
             
-    logger.info(f"Satellite Mining Complete. Captured {success_count} aerial views.")
+    logger.info(f"High-Res Mining Complete. Captured {success_count} aerial views.")
     logger.info(f"Saved to {OUTPUT_DIR}")
+
 
 if __name__ == "__main__":
     mine_satellite()

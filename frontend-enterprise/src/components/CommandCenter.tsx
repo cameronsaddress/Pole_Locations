@@ -33,7 +33,7 @@ export default function CommandCenter() {
 
     // State for the "Satellite Feed" rotation
     const [currentLock, setCurrentLock] = useState<Asset | null>(null)
-    const [cycleIndex, setCycleIndex] = useState(0)
+    // const [cycleIndex, setCycleIndex] = useState(0)
     const [scanProgress, setScanProgress] = useState(0)
 
     const [isExpanded, setIsExpanded] = useState(false) // If user clicks feed to expand
@@ -73,15 +73,19 @@ export default function CommandCenter() {
         if (anomalyFeed.length === 0 || isExpanded) return
 
         const interval = setInterval(() => {
-            setCycleIndex(prev => {
-                const next = (prev + 1) % anomalyFeed.length
-                setCurrentLock(anomalyFeed[next])
-                return next
-            })
+            // Cycle through assets
+            // setCycleIndex(prev => {
+            //    return (prev + 1) % data.length
+            // })
+            if (anomalyFeed.length > 0) {
+                const currentIndex = anomalyFeed.findIndex(asset => asset.id === currentLock?.id);
+                const nextIndex = (currentIndex + 1) % anomalyFeed.length;
+                setCurrentLock(anomalyFeed[nextIndex]);
+            }
             setScanProgress(0) // Reset bar
         }, 8000) // 8 seconds per lock
         return () => clearInterval(interval)
-    }, [anomalyFeed, isExpanded])
+    }, [anomalyFeed, isExpanded, currentLock])
 
     // 3. Scan Progress Animation
     useEffect(() => {

@@ -2,18 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-    Activity,
-    Terminal,
-    Play,
-    CheckCircle,
-    Layers,
-    FileText,
-    Zap,
-    Cpu,
-    Database,
-    Server
-} from 'lucide-react'
+import { Play, Terminal, Activity, Database, Layers, FileText, Cpu, Zap } from "lucide-react";
 import { RegionPickerModal } from "@/components/RegionPickerModal"
 
 // Types
@@ -63,7 +52,7 @@ export default function Pipeline() {
                 .then(data => {
                     if (data.logs) {
                         const lines = data.logs.split('\n').filter(Boolean)
-                        const newLogs = lines.map((l: string, i: number) => ({
+                        const newLogs = lines.map((l: string) => ({
                             timestamp: new Date().toLocaleTimeString(), // Simple timestamp (mock)
                             message: l,
                             type: l.toLowerCase().includes('error') ? 'error' : 'info' as 'info' | 'error'

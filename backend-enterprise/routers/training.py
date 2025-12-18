@@ -28,6 +28,7 @@ class TrainingJobConfig(BaseModel):
     batchSize: int
     autoTune: bool
     detectorModel: str = "yolo11l"
+    dataset: str = "street"
 
 class ClassificationJobConfig(BaseModel):
     labels: str
@@ -128,7 +129,7 @@ async def optimize_detector_closed_loop(config: TrainingJobConfig):
         # 1. Broadcast Start
         job_context["trials_queue"].append({
             "type": "log",
-            "payload": f"Starting Trial {i}/{max_iter} with LR={current_params['lr0']}"
+            "payload": f"Starting Trial {i}/{max_iter} with LR={current_params['lr0']} on {config.dataset}"
         })
         
         # 2. Run Training Script
@@ -137,7 +138,8 @@ async def optimize_detector_closed_loop(config: TrainingJobConfig):
             "--momentum", current_params['momentum'],
             "--weight_decay", current_params['weight_decay'],
             "--epochs", current_params['epochs'],
-            "--batch", config.batchSize
+            "--batch", config.batchSize,
+            "--dataset", config.dataset
         ])
         
         if not result:

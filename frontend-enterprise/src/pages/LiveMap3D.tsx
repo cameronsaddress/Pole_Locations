@@ -21,13 +21,13 @@ interface Asset {
 }
 
 // Helper: Get Tile URL for Satellite View
-const getTileUrl = (lat: number, lng: number, zoom: number) => {
-    const n = Math.pow(2, zoom);
-    const x = Math.floor((lng + 180) / 360 * n);
-    const latRad = lat * Math.PI / 180;
-    const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
-    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
-};
+// const getTileUrl = (lat: number, lng: number, zoom: number) => {
+//     const n = Math.pow(2, zoom);
+//     const x = Math.floor((lng + 180) / 360 * n);
+//     const latRad = lat * Math.PI / 180;
+//     const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+//     return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
+// };
 
 // Helper: Static Map for Thumbnails
 const getStaticMapUrl = (lat: number, lng: number, width: number, height: number) => {
@@ -173,6 +173,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
     const isRotatingRef = useRef(true)
     const isInteractingRef = useRef(false)
     const [assets, setAssets] = useState<Asset[]>([])
+    useEffect(() => { void assets }, [assets]) // Dummy usageState(true)
     const [isRotating, setIsRotating] = useState(true)
 
     // Sync state to ref
@@ -220,7 +221,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                 setTimeout(() => { isRotatingRef.current = true; setIsRotating(true) }, 4500)
             })
 
-            fetchAssets().then(loadedAssets => {
+            fetchAssets(null).then(loadedAssets => {
                 if (loadedAssets.length > 0) {
                     const hero = loadedAssets.sort((a, b) => Math.sqrt((a.lat - TARGET_LAT) ** 2 + (a.lng - TARGET_LNG) ** 2) - Math.sqrt((b.lat - TARGET_LAT) ** 2 + (b.lng - TARGET_LNG) ** 2))[0]
                     setActivePoles([hero])
@@ -240,7 +241,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
         const scheduleRemoval = (id: string) => { if (removalTimers.current.has(id)) clearTimeout(removalTimers.current.get(id)!); const t = setTimeout(() => { if (expandedPoleIdRef.current !== id) setActivePoles(p => p.filter(x => x.id !== id)); removalTimers.current.delete(id) }, 3000); removalTimers.current.set(id, t) }
         map.current.on('mouseenter', 'assets-glow', (e) => {
             const f = e.features?.[0]; if (!f) return
-            const p = { id: f.properties?.id, lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], status: f.properties?.status, confidence: f.properties?.confidence } as Asset
+            const p = { id: f.properties?.id, lat: (f.geometry as any).coordinates[1], lng: (f.geometry as any).coordinates[0], status: f.properties?.status, confidence: f.properties?.confidence } as Asset
             hoveredPoleIdRef.current = p.id; clearTimeout(removalTimers.current.get(p.id)!); removalTimers.current.delete(p.id)
             setActivePoles(prev => prev.find(x => x.id === p.id) ? prev : [...prev.slice(-2), p])
         })

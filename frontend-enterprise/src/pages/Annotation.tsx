@@ -44,7 +44,7 @@ const Annotation = () => {
 
     // Polling Effect for Populating
     useEffect(() => {
-        let interval: NodeJS.Timeout;
+        let interval: any;
         if (isPopulating) {
             interval = setInterval(async () => {
                 const s = await fetchStats();
@@ -82,7 +82,14 @@ const Annotation = () => {
         fetchNext();
     }, [dataset]);
 
-    const handleImageClick = async (e: React.MouseEvent<HTMLImageElement>) => {
+    const [points, setPoints] = useState<Array<{ x: number, y: number }>>([]);
+
+    // Reset points when image changes
+    useEffect(() => {
+        setPoints([]);
+    }, [currentImage]);
+
+    const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
         if (!currentImage || !imageRef.current) return;
 
         const rect = imageRef.current.getBoundingClientRect();
@@ -93,15 +100,30 @@ const Annotation = () => {
         const normX = x / rect.width;
         const normY = y / rect.height;
 
-        const box = { x: normX, y: normY, w: 0.1, h: 0.85 };
+        setPoints(prev => [...prev, { x: normX, y: normY }]);
+    };
 
-        // Save
+    const handleUndo = () => {
+        setPoints(prev => prev.slice(0, -1));
+    };
+
+    const handleSave = async () => {
+        if (!currentImage) return;
+
+        // Convert points to boxes (default size 0.02)
+        const boxes = points.map(p => ({
+            x: p.x,
+            y: p.y,
+            w: 0.02,
+            h: 0.02
+        }));
+
         await fetch(`${apiHost}/api/v2/annotation/save`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 image_id: currentImage.image_id,
-                box: box,
+                boxes: boxes,
                 phase: 1,
                 dataset
             })
@@ -125,7 +147,7 @@ const Annotation = () => {
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Manual Annotation</h1>
-                    <p className="text-gray-400">One-Shot Human Verification Loop.</p>
+                    <p className="text-gray-400">Multi-Select Mode: Click all poles, then Submit.</p>
                     <div className="flex gap-4 mt-2 text-sm font-mono">
                         <span className="text-blue-400">Pending: {stats?.pending || 0}</span>
                         <span className="text-gray-500">Skipped: {stats?.skipped || 0}</span>
@@ -168,22 +190,34 @@ const Annotation = () => {
                 {/* Main Canvas */}
                 <Card className="lg:col-span-2 bg-gray-900 border-gray-800">
                     <CardHeader>
-                        <CardTitle>Current Tile: {currentImage?.filename}</CardTitle>
+                        <CardTitle className="flex justify-between">
+                            <span>Tile: {currentImage?.filename}</span>
+                            <span className="text-sm font-mono text-yellow-400">{points.length} Selected</span>
+                        </CardTitle>
                     </CardHeader>
                     <CardContent className="flex justify-center p-6 bg-black">
                         {isLoading ? (
                             <div className="text-white animate-pulse">Loading Next Tile...</div>
                         ) : currentImage ? (
-                            <div className="relative group cursor-crosshair">
+                            <div className="relative group cursor-crosshair inline-block">
                                 <img
                                     ref={imageRef}
-                                    src={`${apiHost}${currentImage.image_url}`}
+                                    src={`${apiHost}${currentImage.image_url}&t=${Date.now()}`}
                                     alt="Annotation Target"
                                     onClick={handleImageClick}
-                                    className="max-h-[600px] object-contain border border-gray-700"
+                                    className="max-h-[600px] object-contain border border-gray-700 select-none"
                                 />
+                                {/* Render Points */}
+                                {points.map((p, i) => (
+                                    <div
+                                        key={i}
+                                        className="absolute w-3 h-3 bg-red-500 rounded-full border border-white transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                                        style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
+                                    />
+                                ))}
+
                                 <div className="absolute top-2 right-2 bg-black/50 px-2 py-1 text-xs rounded text-white pointer-events-none">
-                                    Click center of pole to save & next
+                                    Click to Add Point
                                 </div>
                             </div>
                         ) : (
@@ -197,9 +231,24 @@ const Annotation = () => {
                     <Card className="bg-gray-900 border-gray-800">
                         <CardHeader><CardTitle>Controls</CardTitle></CardHeader>
                         <CardContent className="space-y-4">
-                            <Button variant="destructive" className="w-full" onClick={handleSkip}>
-                                <SkipForward className="mr-2 h-4 w-4" /> Skip (Unclear/No Pole)
+
+                            {/* Primary Action */}
+                            <Button
+                                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 text-lg"
+                                onClick={handleSave}
+                                disabled={points.length === 0}
+                            >
+                                <Save className="mr-2 h-5 w-5" /> Submit ({points.length})
                             </Button>
+
+                            <div className="grid grid-cols-2 gap-2">
+                                <Button variant="secondary" onClick={handleUndo} disabled={points.length === 0}>
+                                    Undo Last
+                                </Button>
+                                <Button variant="destructive" onClick={handleSkip}>
+                                    <SkipForward className="mr-2 h-4 w-4" /> Skip
+                                </Button>
+                            </div>
 
                             {/* AI Console */}
                             {isAIProcessing && (
@@ -251,7 +300,7 @@ const Annotation = () => {
                                         }
                                     }}
                                 >
-                                    ✨ AI Annotate (Gemini)
+                                    ✨ AI Annotate (Gemini 2.5)
                                 </Button>
 
                                 <div className="grid grid-cols-2 gap-2">
@@ -287,9 +336,9 @@ const Annotation = () => {
                             <div className="text-xs text-gray-500 mt-2">
                                 <p className="font-bold">Instructions:</p>
                                 <ul className="list-disc list-inside space-y-1 mt-2">
-                                    <li>Click on center of pole (Manual).</li>
-                                    <li>Or click <strong>AI Annotate</strong> for auto-detection.</li>
-                                    <li>Use <strong>Skip</strong> if unclear.</li>
+                                    <li>Click poles to place red dots.</li>
+                                    <li>Use <strong>Undo</strong> to fix mistakes.</li>
+                                    <li>Click <strong>Submit</strong> to save all dots.</li>
                                 </ul>
                             </div>
                         </CardContent>

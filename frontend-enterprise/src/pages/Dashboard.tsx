@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { CheckCircle, AlertTriangle, Zap, DollarSign, Activity, FileText } from "lucide-react"
+import { AlertTriangle, Zap, DollarSign, Activity, FileText } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import CommandCenter from "../components/CommandCenter"
 
