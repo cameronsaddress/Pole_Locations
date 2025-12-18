@@ -1,0 +1,726 @@
+{
+ "currentVersion": 11.4,
+ "folders": [],
+ "services": [
+  {
+   "name": "pasda/AdamsCounty",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/Aerials0306StateWide",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/AlleghenyCountyImagery2010",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/AlleghenyCountyImagery2013",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/AlleghenyCountyImagery2015",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/AlleghenyCountyImagery2017",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/AlleghenyCountyLidar2017",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/AlleghenyCounty",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/AlleghenyCountyPittsburghLidar2015",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/AlleghenyCountyUrbanTreeCanopy2010",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/Allentown2016",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/BerksCounty",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/BlairCounty",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/BradfordCounty",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/BucksCounty",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CambriaCounty2001",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CambriaCounty2003",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CambriaCounty2006",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CambriaCounty2009",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CambriaCounty2017",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CambriaCounty2018",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CentreCountyHistoricAerials",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhilly2",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhillyHealth",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhilly",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhillyParks",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhillyPlanning",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhillyPolice",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhillyServices",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhillyStreets",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhillyWater",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/CityPhillyWatersheds",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/Cropland",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DauphinCountyLiDAR2016",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DCNR2",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DCNR_BedrockElevation",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DCNR_Treevitalize",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DCNR",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DelawareValleyLandCover",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DEP2",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DEP_CoastalZoneImageryInventory",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DEP_Geomorphon_2019",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DepHealth",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DEP",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DOQ99",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DOQQ",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DRB_Catchments_HUC_02040101",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DRB_Catchments_HUC_02040102",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DRB_Catchments_HUC_02040103",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DRB_Catchments_HUC_02040104",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DRB_Catchments_HUC_02040106",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DRB_Landcover2013",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DRG",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DVRPC2000",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DVRPC2010",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DVRPC2015",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DVRPC2020",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DVRPC2025",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DVRPC_DEM2015",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DVRPC_elevation",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DVRPC_TileIndex",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/DVRPC",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/ErieCountyParcels",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/FEMADepthGrids",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/FortIndiantownGap",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/FranklinCounty",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/FullersOverlook",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/HIFLD_Schools",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/JohnstownPA_1977_1978",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/JS_SRB_VIS_2",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/LancasterCountyImagery2012",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/LancasterCountyImagery2024",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/LVPC_Imagery",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/LVPC_mosaic2015",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/MercerCounty",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/MIfflinCounty",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/MRLC_ImperviousSurfaes",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/MRLC_LandCover",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/MRLC_TreeCanopy",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2004_WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2008_WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2010_InfraredWEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2010WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2013_InfraredWEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2013WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2015_InfraredWEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2015WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2017_InfraredWEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2017WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2019_InfraredWEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2019WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2022_InfraredWEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NAIP2022WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NationalWeatherService",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NaturalLandsTrust",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NGA_TileIndex",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NGA_USGS_Erie2009",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NGA_USGS_Harrisburg2011",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NGA_USGS_Mercer2005",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NGA_USGS_NewCastle2009",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NGA_USGS_Pittsburgh2005",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NGA_USGS_Pittsburgh2009",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NGA_USGS_Pittsburgh2012",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NGA_USGS_ScrantonWilkesBarre2012",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/NWI2009",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PA_Levees_Flood",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PA_NHAP80s",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PA_SandyLiDAR_tileindex",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAFishBoat",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_Cycle1_Web",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_cycle1",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_cycle2",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_cycle2WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_DEM_mosaic",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_Hillshade_WEB",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_Hillshade",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_iCubed2010_TileIndex",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_iCubed2010",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_SpatialEnergy2011_tileindex",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_SpatialEnergy2011",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_TileIndexNorth",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PAMAP_TileIndexSouth",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PATerrabyte",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PEMAImagery2018_2020",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PEMAImagery2018_Infrared",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PEMAImagery2018",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PEMAImagery2021_2023",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PEMAImagery2021",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PEMAImagery2022",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PEMAImagery_2018_TileIndex",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PennDOT",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaContours2018",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery1996",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2000",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2004",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2005",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2008",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2009",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2010",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2011_leafon",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2011",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2012",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2014",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2015",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2016",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2017",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2018",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2019",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2020",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2022",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2023",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhiladelphiaImagery2024",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhillyDEM",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PhillyLULC",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PSU_Campus_DEM2015",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PSU_Campus_DEM2017",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PSU_Campus_Imagery2015",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PSU_Campus_Imagery2017",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PSU_Campus_Imagery2019",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PSU_Campus_Imagery2022",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PSU_Campus",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PSU_DEP_TWI",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PSU_raster",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/PurpleLizardSVFMap",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/Riparia_LandCover",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/SE_AlleghenyCountyPA_Rt51_1993",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/SeaGrant",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/SouthBeltwayPA_1992",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/SouthwesternPA_SPCProject_2000_2001",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/SRBC_TopographicWetnessIndex",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/StateCollege_UniversityPark_historic",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/Stratification",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/SusquehannaRiverBasin_1973_1975",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/SWPA_SPRPC_1990_1991",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/UrbanTreeCanopy_Landcover",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/USGS_3DHP_Raystown",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/USGS_3DHP_Susquehanna",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/USGS_Hillshade2017",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/WeConservePA",
+   "type": "MapServer"
+  },
+  {
+   "name": "pasda/YCPC2015",
+   "type": "MapServer"
+  }
+ ]
+}

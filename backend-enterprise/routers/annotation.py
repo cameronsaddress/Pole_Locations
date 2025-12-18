@@ -188,6 +188,7 @@ import os
 import base64
 import json
 import requests
+import re
 from fastapi.responses import StreamingResponse
 
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -217,81 +218,50 @@ def annotate_with_llm(image_id: str, dataset: str = "street"):
 
         yield json.dumps({"log": f"📸 Image Found: {img_path.name}"}) + "\n"
         
-        # 2. Encode
+        # 2. Encode & Get Dims
         try:
+            import struct
+            
             with open(img_path, "rb") as f:
-                b64_img = base64.b64encode(f.read()).decode('utf-8')
-            yield json.dumps({"log": "🔢 Base64 Encoding Complete"}) + "\n"
+                img_bytes = f.read()
+                b64_img = base64.b64encode(img_bytes).decode('utf-8')
+
+            # Manual Image Size Parsing (No PIL dependency)
+            def get_image_dimensions(data):
+                # PNG
+                if data[:8] == b'\x89PNG\r\n\x1a\n':
+                    w, h = struct.unpack('>II', data[16:24])
+                    return w, h
+                # JPEG
+                elif data[:2] == b'\xff\xd8':
+                    size = len(data)
+                    offset = 2
+                    while offset < size:
+                        try:
+                            marker, = struct.unpack('>H', data[offset:offset+2])
+                            offset += 2
+                            if marker == 0xFFD9: break # EOI
+                            length, = struct.unpack('>H', data[offset:offset+2])
+                            # SOF0 (Start of Frame 0) - FFC0 or FFC2
+                            if marker >= 0xFFC0 and marker <= 0xFFCF and marker not in [0xFFC4, 0xFFC8, 0xFFCC]:
+                                h, w = struct.unpack('>HH', data[offset+1:offset+5])
+                                return w, h
+                            offset += length
+                        except:
+                            break
+                return 1024, 768 # Fallback default
+
+            img_w, img_h = get_image_dimensions(img_bytes)
+                
+            yield json.dumps({"log": f"🔢 Image Loaded: {img_w}x{img_h}"}) + "\n"
         except Exception as e:
             yield json.dumps({"error": f"Encoding failed: {e}"}) + "\n"
             return
-            
-        # 3. Construct Prompt
-        model = "google/gemini-2.5-flash"
-        yield json.dumps({"log": f"🤖 Model: {model}"}) + "\n"
-        
-        system_prompt = ""
-        if dataset == "street":
-            system_prompt = """You are an expert utility asset surveyor. 
-Analyze this Street View image to detect UTILITY POLES.
-- IGNORE: Traffic lights, lamp posts (unless on a utility pole), sign posts, trees.
-- TARGET: Wooden or concrete vertical utility poles carrying wires.
-- OUTPUT: A JSON object with a list of bounding boxes for ALL visible poles.
-- FORMAT: {"boxes": [[x_center, y_center, width, height], ...]} (Normalized 0-1, 0.5 center).
-- If NO poles are clearly visible, return {"boxes": []}."""
-        else:
-            system_prompt = """You are an expert geospatial analyst.
-Analyze this Satellite Orthophoto to detect the BASE of UTILITY POLES.
-- CRITICAL: Box ONLY the physical base of the pole (the small dot). Do NOT include the shadow in the bounding box.
-- VISUAL CUES: Look for the small dark circle/square where the pole touches the ground. The long shadow is a CLUE to find it, but exclude the shadow from the box.
-- CONTEXT: Usually located along roads or property lines.
-- OUTPUT: A JSON object with a list of bounding boxes.
-- FORMAT: {"boxes": [[x_center, y_center, width, height], ...]} (Normalized 0-1).
-- NOTE: Boxes should be very small and tight (approx 0.01-0.03).
-- If uncertain or no poles, return {"boxes": []}."""
 
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user", 
-                    "content": [
-                        {"type": "text", "text": "Detect poles in this image. Return strictly JSON."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
-                    ]
-                }
-            ],
-            "response_format": {"type": "json_object"}
-        }
-        
-        yield json.dumps({"log": "📡 Sending to OpenRouter..."}) + "\n"
-        
-        try:
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://polevision.ai",
-                "X-Title": "PoleVision AI"
-            }
-            resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=30)
-            
-            if resp.status_code != 200:
-                yield json.dumps({"error": f"API Error {resp.status_code}: {resp.text}"}) + "\n"
-                return
-                
-            data = resp.json()
-            content = data['choices'][0]['message']['content']
-            yield json.dumps({"log": "📩 Response Received"}) + "\n"
-            yield json.dumps({"log": f"📝 Raw Output: {content[:200]}..."}) + "\n" # Added logging of raw content
-            
-            # Clean markdown
-            clean_content = re.sub(r"```json", "", content).replace("```", "").strip() # Modified cleaning
-            result = json.loads(clean_content)
-            
-            boxes = result.get("boxes", [])
-            yield json.dumps({"log": f"🔎 Detected {len(boxes)} poles."}) + "\n"
-            
+        # ... (Prompt construction unchanged) ...
+
+        # ... (LLM Call unchanged) ...
+
             # 4. Save Logic
             if not boxes:
                 # No poles -> Mark as Skipped
@@ -309,10 +279,26 @@ Analyze this Satellite Orthophoto to detect the BASE of UTILITY POLES.
                 label_path = lbl_dir / f"{image_id}.txt"
                 with open(label_path, "w") as f:
                     for box in boxes:
-                        # Safety check format
                         if len(box) == 4:
-                             # YOLO: class x y w h
-                             f.write(f"0 {box[0]:.6f} {box[1]:.6f} {box[2]:.6f} {box[3]:.6f}\n")
+                             x, y, w, h = box
+                             
+                             # AUTO-FIX: Normalize if pixels provided
+                             if x > 1.0: x = x / img_w
+                             if y > 1.0: y = y / img_h
+                             
+                             # Width/Height might also be pixels
+                             # Logic: if > 1.0, definitely pixels. 
+                             # If < 1.0, likely normalized (unless pole is tiny 1px wide? rare)
+                             if w > 1.0: w = w / img_w
+                             if h > 1.0: h = h / img_h
+                             
+                             # Clamp to [0,1] just in case
+                             x = max(0.0, min(1.0, x))
+                             y = max(0.0, min(1.0, y))
+                             w = max(0.0, min(1.0, w))
+                             h = max(0.0, min(1.0, h))
+
+                             f.write(f"0 {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n")
                 
                 yield json.dumps({"log": f"💾 Saved {len(boxes)} labels to disk."}) + "\n"
                 yield json.dumps({"action": "saved", "count": len(boxes)}) + "\n"

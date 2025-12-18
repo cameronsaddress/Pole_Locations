@@ -82,40 +82,85 @@ const Annotation = () => {
         fetchNext();
     }, [dataset]);
 
-    const [points, setPoints] = useState<Array<{ x: number, y: number }>>([]);
+    // Annotations State (Top-Left X/Y, W/H)
+    const [annotations, setAnnotations] = useState<Array<{ x: number, y: number, w: number, h: number }>>([]);
+    const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
+    const [currentDrag, setCurrentDrag] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
 
-    // Reset points when image changes
+    // Reset when image changes
     useEffect(() => {
-        setPoints([]);
+        setAnnotations([]);
+        setDragStart(null);
+        setCurrentDrag(null);
     }, [currentImage]);
 
-    const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
-        if (!currentImage || !imageRef.current) return;
-
+    const getNormCoords = (e: React.MouseEvent) => {
+        if (!imageRef.current) return null;
         const rect = imageRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        return {
+            x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+            y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height))
+        };
+    };
 
-        // Normalize
-        const normX = x / rect.width;
-        const normY = y / rect.height;
+    const handleMouseDown = (e: React.MouseEvent) => {
+        const coords = getNormCoords(e);
+        if (coords) setDragStart(coords);
+    };
 
-        setPoints(prev => [...prev, { x: normX, y: normY }]);
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!dragStart) return;
+        const coords = getNormCoords(e);
+        if (!coords) return;
+
+        const x = Math.min(dragStart.x, coords.x);
+        const y = Math.min(dragStart.y, coords.y);
+        const w = Math.abs(dragStart.x - coords.x);
+        const h = Math.abs(dragStart.y - coords.y);
+
+        setCurrentDrag({ x, y, w, h });
+    };
+
+    const handleMouseUp = (e: React.MouseEvent) => {
+        if (!dragStart) return;
+        const coords = getNormCoords(e); // Needed for click detection
+
+        // Config based on dataset
+        const isSat = dataset === 'satellite';
+
+        let newBox;
+        // Click Detection (Tiny Drag)
+        if (!currentDrag || (currentDrag.w < 0.005 && currentDrag.h < 0.005)) {
+            // Create default small box centered on click
+            const w = 0.02;
+            const h = isSat ? 0.02 : 0.06; // Taller defaults for Street View
+            newBox = {
+                x: dragStart.x - (w / 2),
+                y: dragStart.y - (h / 2),
+                w, h
+            };
+        } else {
+            newBox = currentDrag;
+        }
+
+        setAnnotations(prev => [...prev, newBox]);
+        setDragStart(null);
+        setCurrentDrag(null);
     };
 
     const handleUndo = () => {
-        setPoints(prev => prev.slice(0, -1));
+        setAnnotations(prev => prev.slice(0, -1));
     };
 
     const handleSave = async () => {
         if (!currentImage) return;
 
-        // Convert points to boxes (default size 0.02)
-        const boxes = points.map(p => ({
-            x: p.x,
-            y: p.y,
-            w: 0.02,
-            h: 0.02
+        // Convert TopLeft-WH to Center-XY-WH for YOLO
+        const boxes = annotations.map(a => ({
+            x: a.x + (a.w / 2),
+            y: a.y + (a.h / 2),
+            w: a.w,
+            h: a.h
         }));
 
         await fetch(`${apiHost}/api/v2/annotation/save`, {
@@ -192,33 +237,52 @@ const Annotation = () => {
                     <CardHeader>
                         <CardTitle className="flex justify-between">
                             <span>Tile: {currentImage?.filename}</span>
-                            <span className="text-sm font-mono text-yellow-400">{points.length} Selected</span>
+                            <span className="text-sm font-mono text-yellow-400">{annotations.length} Selected</span>
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="flex justify-center p-6 bg-black">
                         {isLoading ? (
                             <div className="text-white animate-pulse">Loading Next Tile...</div>
                         ) : currentImage ? (
-                            <div className="relative group cursor-crosshair inline-block">
+                            <div
+                                className="relative group inline-block select-none"
+                                onMouseDown={handleMouseDown}
+                                onMouseMove={handleMouseMove}
+                                onMouseUp={handleMouseUp}
+                                onMouseLeave={() => { setDragStart(null); setCurrentDrag(null); }}
+                            >
                                 <img
                                     ref={imageRef}
                                     src={`${apiHost}${currentImage.image_url}&t=${Date.now()}`}
                                     alt="Annotation Target"
-                                    onClick={handleImageClick}
-                                    className="max-h-[600px] object-contain border border-gray-700 select-none"
+                                    className="max-h-[600px] object-contain border border-gray-700 cursor-crosshair"
+                                    draggable={false}
                                 />
-                                {/* Render Points */}
-                                {points.map((p, i) => (
+                                {/* Render Boxes */}
+                                {annotations.map((box, i) => (
                                     <div
                                         key={i}
-                                        className="absolute w-3 h-3 bg-red-500 rounded-full border border-white transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-                                        style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
+                                        className="absolute border-2 border-green-500 bg-green-500/20"
+                                        style={{
+                                            left: `${box.x * 100}%`,
+                                            top: `${box.y * 100}%`,
+                                            width: `${box.w * 100}%`,
+                                            height: `${box.h * 100}%`
+                                        }}
                                     />
                                 ))}
-
-                                <div className="absolute top-2 right-2 bg-black/50 px-2 py-1 text-xs rounded text-white pointer-events-none">
-                                    Click to Add Point
-                                </div>
+                                {/* Drag Preview */}
+                                {currentDrag && (
+                                    <div
+                                        className="absolute border-2 border-yellow-400 bg-yellow-400/20"
+                                        style={{
+                                            left: `${currentDrag.x * 100}%`,
+                                            top: `${currentDrag.y * 100}%`,
+                                            width: `${currentDrag.w * 100}%`,
+                                            height: `${currentDrag.h * 100}%`
+                                        }}
+                                    />
+                                )}
                             </div>
                         ) : (
                             <div className="text-gray-500">No image loaded.</div>
@@ -236,13 +300,13 @@ const Annotation = () => {
                             <Button
                                 className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 text-lg"
                                 onClick={handleSave}
-                                disabled={points.length === 0}
+                                disabled={annotations.length === 0}
                             >
-                                <Save className="mr-2 h-5 w-5" /> Submit ({points.length})
+                                <Save className="mr-2 h-5 w-5" /> Submit ({annotations.length})
                             </Button>
 
                             <div className="grid grid-cols-2 gap-2">
-                                <Button variant="secondary" onClick={handleUndo} disabled={points.length === 0}>
+                                <Button variant="secondary" onClick={handleUndo} disabled={annotations.length === 0}>
                                     Undo Last
                                 </Button>
                                 <Button variant="destructive" onClick={handleSkip}>
@@ -336,9 +400,9 @@ const Annotation = () => {
                             <div className="text-xs text-gray-500 mt-2">
                                 <p className="font-bold">Instructions:</p>
                                 <ul className="list-disc list-inside space-y-1 mt-2">
-                                    <li>Click poles to place red dots.</li>
-                                    <li>Use <strong>Undo</strong> to fix mistakes.</li>
-                                    <li>Click <strong>Submit</strong> to save all dots.</li>
+                                    <li><strong>Click & Drag</strong> to box poles.</li>
+                                    <li>Click once for a standard box. (Tall for street, square for sat).</li>
+                                    <li>Submit to save detections.</li>
                                 </ul>
                             </div>
                         </CardContent>
