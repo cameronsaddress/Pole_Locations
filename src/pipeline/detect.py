@@ -130,7 +130,7 @@ def run_detection_service(limit: int = 1000, target_path: str = None):
                         # For now, we use the batch for simplicity + recent history
                         # Ideally: stringer_input = session.exec(select(Pole.location)...).all()
                         
-                        batch_coords = [(d.location.y, d.location.x) for d in detections_to_add]
+                        batch_coords = [(to_shape(d.location).y, to_shape(d.location).x) for d in detections_to_add]
                         
                         stringer = PearlStringer(spacing_min=30, spacing_max=60)
                         stringer.find_missing_pearls(batch_coords, session=session, write_to_db=True)
@@ -208,6 +208,13 @@ def run_detection_service(limit: int = 1000, target_path: str = None):
                                     
                     else:
                         logger.debug("    No street view images found for correlation.")
+                
+                # Success: Commit Fusion & SV Updates
+                tile.status = "Completed"
+                tile.last_processed_at = datetime.utcnow()
+                session.add(tile)
+                session.commit()
+                logger.info(f"Tile {tile.id}: Processing complete.")
                 
             except Exception as e:
                 logger.error(f"❌ Failed tile {tile.id}: {e}", exc_info=True)

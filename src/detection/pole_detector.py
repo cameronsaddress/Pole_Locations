@@ -136,8 +136,15 @@ class PoleDetector:
              logger.info("Street Expert not found. Using Satellite model as Proxy.")
              self.models['street'] = self.models['satellite']
              
-        # Set default for implicit calls
-        self.model = self.models['satellite'] 
+        # 1. Load Main Detection Model (YOLO11)
+        # Check for Fine-Tuned Expert Model first
+        expert_weights = Path("/workspace/models/checkpoints/yolo11l_satellite_expert/weights/best.pt")
+        if expert_weights.exists():
+            logger.info(f"Loading Fine-Tuned Expert Model: {expert_weights}")
+            self.model = YOLO(str(expert_weights))
+        else:
+            logger.info("Loading Base Model: yolo11l.pt")
+            self.model = YOLO("yolo11l.pt")
         
         # GPU Transfer
         for k, m in self.models.items():
@@ -187,7 +194,7 @@ class PoleDetector:
                 device_name = "CUDA device"
             logger.info("Using GPU acceleration on %s", device_name)
         else:
-            logger.info("CUDA not available; running detector on CPU.")
+            logger.info("Zero-shot classification disabled.")
 
         try:
             self.model.to(self.device)

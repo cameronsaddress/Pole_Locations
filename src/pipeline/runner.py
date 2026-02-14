@@ -8,7 +8,7 @@ from src.pipeline.detect import run_detection_service
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def run_pipeline(data_dirs, continuous=False):
+def run_pipeline(data_dirs, skip_ingest=False, continuous=False):
     logger.info("🚀 Starting Unified Enterprise Pipeline run...")
     
     # 0. Clean DB (Optional but good for demo integrity if we want to be sure)
@@ -17,8 +17,11 @@ def run_pipeline(data_dirs, continuous=False):
     # Let's just rely on the limit increase.
     
     # 1. Ingest
-    logging.info("--- Stage 1: Ingestion ---")
-    ingest_imagery_tiles(data_dirs)
+    if not skip_ingest:
+        logging.info("--- Stage 1: Ingestion ---")
+        ingest_imagery_tiles(data_dirs)
+    else:
+        logging.info("--- Stage 1: Ingestion (SKIPPED) ---")
     
     # 2. Unified Detection Service
     # (Inference -> Enrichment -> Fusion -> Persistence)
@@ -31,12 +34,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dirs", nargs="+", default=["/data/imagery/naip_tiles"], help="Imagery directories")
     parser.add_argument("--loop", action="store_true", help="Run in continuous loop")
+    parser.add_argument("--skip-ingest", action="store_true", help="Skip ingestion phase")
     args = parser.parse_args()
     
     if args.loop:
         while True:
-            run_pipeline(args.dirs)
+            run_pipeline(args.dirs, skip_ingest=args.skip_ingest)
             logger.info("Sleeping 60s...")
             time.sleep(60)
     else:
-        run_pipeline(args.dirs)
+        run_pipeline(args.dirs, skip_ingest=args.skip_ingest)

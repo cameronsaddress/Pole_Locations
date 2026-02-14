@@ -130,7 +130,9 @@ class PipelineManager:
         try:
             # We look for key scripts
             res = subprocess.run(["docker", "exec", "polevision-gpu", "ps", "aux"], capture_output=True, text=True)
-            output = res.stdout
+            # Filter out zombie/defunct processes
+            lines = [line for line in res.stdout.splitlines() if "<defunct>" not in line and "Z" not in line.split()[7:8]] # Basic check
+            output = "\n".join(lines)
             
             job_type = None
             if "run_full_enterprise_pipeline.py" in output:
@@ -207,23 +209,55 @@ class PipelineManager:
         # 2. INTEGRITY CHECK
         elif job_type == "integrity":
             cmd = base_cmd + ["python3", "/workspace/src/utils/integrity.py"]
+
+        # 2b. RESET TILES (Force Re-Scan)
+        elif job_type == "reset_tiles":
+            cmd = base_cmd + ["python3", "/workspace/src/utils/reset_tiles.py"]
         
         # 3. TRAIN SATELLITE
         elif job_type == "train_satellite":
             epochs = params.get("epochs", 50)
             batch = params.get("batch_size", 16)
-            cmd = base_cmd + [
-                "yolo", "detect", "train",
-                "model=yolo11l.pt",
-                "data=/workspace/data/training/satellite_expert/dataset.yaml",
-                f"epochs={epochs}",
-                f"batch={batch}",
-                "imgsz=640",
-                "project=/workspace/models/checkpoints",
-                "name=yolo11l_satellite_expert",
-                "device=0",
-                "exist_ok=True"
-            ]
+            continuous = params.get("continuous", False)
+            
+            # Default to base model
+            model_path = "yolo11l.pt"
+            
+            # If continuous, try to resume/finetune from best.pt
+            if continuous:
+                 model_path = "/workspace/models/checkpoints/yolo11l_satellite_expert/weights/best.pt"
+                 
+                 # Construct Chained Command for Auto-Fix Loop
+                 # 1. Train (Fine Tune)
+                 train_cmd = (
+                     f"yolo detect train model={model_path} "
+                     f"data=/workspace/data/training/satellite_expert/dataset.yaml "
+                     f"epochs={epochs} batch={batch} imgsz=640 "
+                     f"project=/workspace/models/checkpoints name=yolo11l_satellite_expert "
+                     f"device=0 exist_ok=True"
+                 )
+                 
+                 # 2. Inference (Re-Scan Pending Tiles)
+                 inf_cmd = f"python3 /workspace/src/pipeline/runner.py --skip-ingest"
+                 reset_cmd = "python3 src/utils/reset_tiles.py"
+                 
+                 # Execute via bash to enable chaining (&&)
+                 cmd = base_cmd + ["bash", "-c", f"{train_cmd} && {reset_cmd} && {inf_cmd}"]
+                 
+            else:
+                # Standard Training (List format for robustness)
+                cmd = base_cmd + [
+                    "yolo", "detect", "train",
+                    f"model={model_path}",
+                    "data=/workspace/data/training/satellite_expert/dataset.yaml",
+                    f"epochs={epochs}",
+                    f"batch={batch}",
+                    "imgsz=640",
+                    "project=/workspace/models/checkpoints",
+                    "name=yolo11l_satellite_expert",
+                    "device=0",
+                    "exist_ok=True"
+                ]
 
         # 4. TRAIN STREET
         elif job_type == "train_street":
@@ -318,8 +352,11 @@ class PipelineManager:
             
             # Force Kill inside container
             try:
-                subprocess.run(["docker", "exec", "polevision-gpu", "pkill", "-f", "python3"], timeout=2)
-                subprocess.run(["docker", "exec", "polevision-gpu", "pkill", "-f", "yolo"], timeout=2)
+                # Force kill Python processes (Aggressive cleanup)
+                subprocess.run(["docker", "exec", "polevision-gpu", "pkill", "-f", "python3"], timeout=2, check=False) # Standard
+                subprocess.run(["docker", "exec", "polevision-gpu", "pkill", "-f", "python"], timeout=2, check=False)  # Alias/Legacy
+                subprocess.run(["docker", "exec", "polevision-gpu", "pkill", "-f", "runner.py"], timeout=2, check=False) # Specific Script
+                subprocess.run(["docker", "exec", "polevision-gpu", "pkill", "-f", "yolo"], timeout=2, check=False)
             except:
                 pass
 

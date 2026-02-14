@@ -346,3 +346,116 @@ def get_recent_annotations(dataset: str = "street", limit: int = 10):
         })
         
     return results
+
+# --- Map-Based Annotation (Active Learning) ---
+@router.post("/from_map")
+def annotate_from_map(data: Dict[str, Any], session: Session = Depends(get_session)):
+    """
+    Active Learning: User clicks on map -> We crop tile -> Save as training sample.
+    Input: { "lat": float, "lon": float, "dataset": "satellite" }
+    """
+    from models import Tile
+    from geoalchemy2.shape import from_shape
+    from shapely.geometry import Point
+    import rasterio
+    from rasterio.windows import Window
+    import numpy as np
+    from PIL import Image
+    import uuid
+    from datetime import datetime
+
+    lat = data.get("lat")
+    lon = data.get("lon")
+    dataset = data.get("dataset", "satellite")
+    
+    if not lat or not lon:
+        return {"status": "error", "message": "Missing lat/lon"}
+
+    # 1. Find Tile
+    # Using SQLModel with PostGIS
+    # Note: Ensure SRID 4326 matches DB
+    point = from_shape(Point(lon, lat), srid=4326)
+    
+    # Simple check: BBox overlap (fastest)
+    stmt = select(Tile).where(func.ST_Intersects(Tile.bbox, point)).limit(1)
+    tile = session.exec(stmt).first()
+    
+    if not tile:
+        return {"status": "error", "message": "No imagery tile found at this location."}
+        
+    # 2. Open Tile
+    tile_path = Path(tile.path)
+    if not tile_path.exists():
+         return {"status": "error", "message": "Tile file missing."}
+
+    try:
+        with rasterio.open(tile_path) as src:
+            # 3. Convert Lat/Lon to Pixel
+            # src.index(lon, lat) returns (row, col)
+            row, col = src.index(lon, lat)
+            
+            # 4. Crop (640x640)
+            crop_size = 640
+            half = crop_size // 2
+            
+            # Calculate window (clamped)
+            r_start = max(0, row - half)
+            c_start = max(0, col - half)
+            
+            window = Window(c_start, r_start, crop_size, crop_size)
+            
+            # Read
+            data_arr = src.read([1, 2, 3], window=window)
+            
+            # Check if crop is full size (edge case)
+            if data_arr.shape[1] != crop_size or data_arr.shape[2] != crop_size:
+                 # TODO: Pad? For now, just reject edge clicks if too close
+                 pass
+                 
+            # Convert to HWC
+            img = np.transpose(data_arr, (1, 2, 0))
+            
+            # 5. Save
+            img_dir, lbl_dir, _ = get_dataset_paths("satellite") # Force satellite drops
+            img_dir.mkdir(parents=True, exist_ok=True)
+            lbl_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate ID
+            new_id = f"manual_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
+            
+            # Save Image (RGB)
+            pil_img = Image.fromarray(img)
+            pil_img.save(img_dir / f"{new_id}.jpg")
+            
+            # 6. Create Label (Center Point)
+            # Since we cropped CENTERED on the lat/lon (mostly), 
+            # the pole is at (0.5, 0.5) relative to the crop!
+            
+            # Refine Center:
+            # We requested crop at (row-half, col-half).
+            # The click was at (row, col).
+            # So the click is at (row - r_start, col - c_start) inside the crop.
+            
+            rel_y = (row - r_start) / data_arr.shape[1] # Height is shape[1]
+            rel_x = (col - c_start) / data_arr.shape[2] # Width is shape[2]
+            
+            label_path = lbl_dir / f"{new_id}.txt"
+            with open(label_path, "w") as f:
+                # Class 0, X, Y, W, H
+                # Using small box 0.02
+                f.write(f"0 {rel_x:.6f} {rel_y:.6f} 0.02 0.02\n")
+            
+            # 7. Reset Tile Status to Pending (Trigger Re-Inference)
+            tile.status = "pending"
+            session.add(tile)
+            session.commit()
+                
+            return {
+                "status": "success", 
+                "image_id": new_id, 
+                "tile_id": tile.id,
+                "message": "Sample saved. Tile marked for re-scan."
+            }
+            
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

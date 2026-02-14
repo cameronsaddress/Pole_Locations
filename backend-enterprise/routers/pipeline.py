@@ -12,7 +12,7 @@ class JobRequest(BaseModel):
 @router.get("/datasets")
 def get_datasets():
     """List available datasets grouped by region."""
-    return Response(content=log_content, media_type="text/plain")
+    return PipelineManager.list_datasets()
 
 @router.get("/serve_image/{filename}")
 def serve_image(filename: str, dataset: str = "street"):

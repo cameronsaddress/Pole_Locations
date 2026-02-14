@@ -42,7 +42,7 @@ services:
     command: sleep infinity
     environment:
       - PYTHONPATH=/workspace:/workspace/backend-enterprise
-      - DATABASE_URL=postgresql://pole_user:pole_secure_password@localhost:5433/polevision
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-pole_user}:${POSTGRES_PASSWORD:-pole_secure_password}@localhost:5433/polevision
     depends_on:
       polevision-db:
         condition: service_healthy
@@ -82,7 +82,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_API_URL: http://100.83.153.43:8000
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     depends_on:
       - polevision-api
 

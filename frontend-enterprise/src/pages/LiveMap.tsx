@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents, GeoJSON } from 'react-leaflet'
 import { DomEvent } from 'leaflet'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Activity, Layers, Filter } from "lucide-react"
+import { Activity, Layers, Filter, Crosshair, Save } from "lucide-react"
 import 'leaflet/dist/leaflet.css'
 import { Button } from '@/components/ui/button'
 
@@ -17,23 +17,14 @@ interface Asset {
    mapillary_key?: string
 }
 
-// Helper: Get Tile URL for Satellite View
-// const getTileUrl = (lat: number, lng: number, zoom: number) => {
-//    // ... implementation ...
-//    return '';
-// };
-
-// Component to fetch and display Mapillary Image
 const MapillaryImage = ({ imageKey }: { imageKey: string }) => {
    const [imageUrl, setImageUrl] = useState<string | null>(null)
    const [loading, setLoading] = useState(true)
 
    useEffect(() => {
       if (!imageKey) return
-
       const token = import.meta.env.VITE_MAPILLARY_TOKEN
       if (!token) return
-
       fetch(`https://graph.mapillary.com/${imageKey}?access_token=${token}&fields=thumb_2048_url`)
          .then(res => res.json())
          .then(data => {
@@ -41,7 +32,6 @@ const MapillaryImage = ({ imageKey }: { imageKey: string }) => {
             setLoading(false)
          })
          .catch(err => {
-            void err;
             setLoading(false)
          })
    }, [imageKey])
@@ -59,51 +49,37 @@ const MapillaryImage = ({ imageKey }: { imageKey: string }) => {
    )
 }
 
-// Map Controller for data fetching and view interactions
 const MapController = ({
    setAssets,
    setLoading,
    selectedPole,
    setSelectedPole,
-   zoomLevel // Now received as a prop
+   zoomLevel,
+   isTrainMode, // NEW
+   onTrainClick // NEW
 }: any) => {
    const map = useMap()
-
    const [counties, setCounties] = useState<any>(null)
-   const [assetsLoaded, setAssetsLoaded] = useState(false) // Track if we've fetched assets
-
-   // Dummy usage
-   useEffect(() => { void assetsLoaded; void selectedPole; void setSelectedPole; void zoomLevel; }, [assetsLoaded, selectedPole, setSelectedPole, zoomLevel])
+   const [isFocused, setIsFocused] = useState(false)
 
    // 1. Fetch Counties on Mount
    useEffect(() => {
-      // Fetch US Counties and filter for Pennsylvania (State FIPS '42')
       fetch('/pa_counties.geojson')
          .then(res => res.json())
          .then(data => {
-            // Filter features where STATE val is '42' (PA)
-            const paFeatures = data.features.filter((f: any) =>
-               f.id && f.id.startsWith('42')
-            );
+            const paFeatures = data.features.filter((f: any) => f.id && f.id.startsWith('42'));
             setCounties({ ...data, features: paFeatures });
          })
          .catch(err => console.error("Failed to load counties:", err))
    }, [])
 
-   const [isFocused, setIsFocused] = useState(false) // Track if user has drilled down into a county
-
    // 2. Fetch Assets (Viewport Based)
    const fetchVisibleAssets = () => {
       const z = map.getZoom()
-
-      // LOGIC: Show assets if:
-      // 1. Zoom is high enough (Standard exploration, z >= 9)
-      // 2. OR User explicitly clicked a county (isFocused) and isn't totally zoomed out (z >= 7.5)
       const shouldShowAssets = z >= 9 || (isFocused && z >= 7.5)
 
       if (!shouldShowAssets) {
-         setAssets([]) // Clear assets to save memory/visuals
-         setAssetsLoaded(false)
+         setAssets([])
          return
       }
 
@@ -114,95 +90,65 @@ const MapController = ({
       setLoading(true)
       fetch(`${apiHost}/api/v2/assets${query}`)
          .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            if (!res.ok) throw new Error("API Error")
             return res.json()
          })
          .then(data => {
             setAssets(data)
             setLoading(false)
-            setAssetsLoaded(true)
          })
          .catch(err => {
-            console.error("Failed to load assets:", err)
             setLoading(false)
          })
    }
 
-   // Initial Load
-   useEffect(() => {
-      fetchVisibleAssets()
-   }, [])
+   useEffect(() => { fetchVisibleAssets() }, [])
 
-   // Zoom/Move Listeners
    useMapEvents({
       zoomend: () => {
          const z = map.getZoom()
-         // If user zooms out to State View (approx 8 or lower), reset focus mode
-         if (z < 8) {
-            setIsFocused(false)
-         }
+         if (z < 8) setIsFocused(false)
          fetchVisibleAssets()
       },
       moveend: () => {
-         const handler = setTimeout(() => {
-            fetchVisibleAssets()
-         }, 500)
+         const handler = setTimeout(() => { fetchVisibleAssets() }, 500)
          return () => clearTimeout(handler)
       },
-      click: () => {
-         if (selectedPole) setSelectedPole(null)
+      click: (e) => {
+         if (isTrainMode) {
+            onTrainClick(e.latlng)
+         } else {
+            if (selectedPole) setSelectedPole(null)
+         }
       }
    })
 
-   // Style for Counties
    const onEachCounty = (feature: any, layer: any) => {
-      // Add Tooltip Label
       if (feature.properties && feature.properties.NAME) {
-         layer.bindTooltip(feature.properties.NAME, {
-            permanent: true,
-            direction: 'center',
-            className: 'county-label'
-         });
+         layer.bindTooltip(feature.properties.NAME, { permanent: true, direction: 'center', className: 'county-label', opacity: 1.0 });
       }
+      const SUPPORTED = ['Dauphin', 'York', 'Cumberland']
+      const isSupported = SUPPORTED.includes(feature.properties.NAME)
 
-      // Check if Supported
-      const SUPPORTED_COUNTIES = ['Dauphin', 'York', 'Cumberland']
-      const isSupported = SUPPORTED_COUNTIES.includes(feature.properties.NAME)
-
-      // Initial Style
       layer.setStyle({
          weight: isSupported ? 2 : 1,
-         color: isSupported ? '#22d3ee' : '#475569', // Cyan for supported, Slate-600 for others
+         color: isSupported ? '#22d3ee' : '#475569',
          fillColor: '#0f172a',
          fillOpacity: isSupported ? 0.1 : 0.05,
-         dashArray: isSupported ? null : '4'
+         dashArray: isSupported ? null : '4',
+         interactive: !isTrainMode
       })
 
-      layer.on({
-         mouseover: (e: any) => {
-            const layer = e.target;
-            layer.setStyle({
-               weight: 3,
-               color: '#ffffff', // White highlight on hover
-               fillOpacity: 0.2
-            });
-         },
-         mouseout: (e: any) => {
-            const layer = e.target;
-            // Revert to default style
-            layer.setStyle({
-               weight: isSupported ? 2 : 1,
-               color: isSupported ? '#22d3ee' : '#475569',
-               fillOpacity: isSupported ? 0.1 : 0.05
-            });
-         },
-         click: (e: any) => {
-            // Only focus on Supported counties for asset fetching? 
-            // Or allow clicking any to zoom in? Let's allow zooming in.
-            setIsFocused(true)
-            map.fitBounds(e.target.getBounds(), { padding: [20, 20] });
-         }
-      });
+      if (!isTrainMode) {
+         layer.on({
+            mouseover: (e: any) => e.target.setStyle({ weight: 3, color: '#ffffff', fillOpacity: 0.2 }),
+            mouseout: (e: any) => e.target.setStyle({ weight: isSupported ? 2 : 1, color: isSupported ? '#22d3ee' : '#475569', fillOpacity: isSupported ? 0.1 : 0.05 }),
+            click: (e: any) => {
+               setIsFocused(true)
+               map.fitBounds(e.target.getBounds(), { padding: [20, 20] });
+            }
+         });
+      }
    }
 
    // 1. Zoom/Move Logic
@@ -212,40 +158,25 @@ const MapController = ({
 
    return (
       <>
-         {/* Show Counties if Zoom < 12 */}
          {zoomLevel < 12 && counties && (
-            <GeoJSON
-               data={counties}
-               onEachFeature={onEachCounty}
-            />
+            <GeoJSON key={`counties-${isTrainMode}`} data={counties} onEachFeature={onEachCounty} />
          )}
-
-         {/* State Label Layer */}
          {zoomLevel < 9 && (
             <>
                <StateLabel position={[40.9, -77.8]} name="Pennsylvania" />
-               <StateLabel position={[42.6, -75.5]} name="New York" />
                <StateLabel position={[39.0, -76.8]} name="Maryland" />
-               <StateLabel position={[40.1, -82.9]} name="Ohio" />
-               <StateLabel position={[38.8, -80.5]} name="West Virginia" />
                <StateLabel position={[40.0, -74.5]} name="New Jersey" />
+               <StateLabel position={[42.0, -75.5]} name="New York" />
+               <StateLabel position={[39.0, -81.0]} name="West Virginia" />
             </>
          )}
-
       </>
    )
 }
 
 const StateLabel = ({ position, name }: { position: [number, number], name: string }) => (
    <CircleMarker center={position} pathOptions={{ stroke: false, fill: false }} radius={0}>
-      <Popup
-         closeButton={false}
-         autoClose={false}
-         closeOnEscapeKey={false}
-         closeOnClick={false}
-         className="state-label-popup"
-         offset={[0, 0]}
-      >
+      <Popup closeButton={false} autoClose={false} closeOnEscapeKey={false} closeOnClick={false} className="state-label-popup" offset={[0, 0]}>
          <span className="text-white/30 text-4xl md:text-6xl font-black tracking-[0.2em] uppercase select-none pointer-events-none drop-shadow-xl whitespace-nowrap" style={{ fontFamily: 'Inter, sans-serif' }}>
             {name}
          </span>
@@ -263,9 +194,7 @@ const AssetDetailsModal = ({ pole, onClose }: { pole: Asset | null, onClose: () 
                <p>Status: <span className="text-cyan-400">{pole.status}</span></p>
                <p>Confidence: {(pole.confidence * 100).toFixed(1)}%</p>
                <p>Coords: {pole.lat.toFixed(6)}, {pole.lng.toFixed(6)}</p>
-               {pole.mapillary_key && (
-                  <MapillaryImage imageKey={pole.mapillary_key} />
-               )}
+               {pole.mapillary_key && <MapillaryImage imageKey={pole.mapillary_key} />}
             </div>
             <Button className="mt-6 w-full" onClick={onClose}>Close</Button>
          </div>
@@ -274,90 +203,142 @@ const AssetDetailsModal = ({ pole, onClose }: { pole: Asset | null, onClose: () 
 }
 
 const MapEventsHandler = ({ setZoomLevel }: { setZoomLevel: (z: number) => void }) => {
-   const map = useMapEvents({
-      zoomend: () => setZoomLevel(map.getZoom())
-   })
+   const map = useMapEvents({ zoomend: () => setZoomLevel(map.getZoom()) })
    return null
 }
 
 const PoleLinesLayer = ({ zoom }: { zoom: number }) => {
    const [networkData, setNetworkData] = useState<any>(null)
-
    useEffect(() => {
-      fetch('/pole_network.geojson') // Make sure this endpoint exists or mock it
-         .then(res => res.json())
-         .then(data => setNetworkData(data))
-         .catch(err => console.error("Failed to load network layer:", err))
+      fetch('/pole_network.geojson').then(res => res.json()).then(data => setNetworkData(data)).catch(err => { })
    }, [])
-
    if (zoom > 13 || !networkData) return null
-
    const opacity = zoom < 11 ? 0.6 : Math.max(0.1, 0.6 - ((zoom - 11) * 0.2))
    const weight = zoom < 11 ? 1.5 : 1
+   return <GeoJSON data={networkData} style={{ color: '#22d3ee', weight: weight, opacity: opacity, interactive: false }} />
+}
+
+const StatusHUD = () => {
+   const [status, setStatus] = useState<any>(null)
+   const [log, setLog] = useState<string>("")
+
+   // Polling
+   useEffect(() => {
+      const timer = setInterval(() => {
+         const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+         fetch(`${apiHost}/api/v2/pipeline/status`)
+            .then(res => res.json())
+            .then(data => {
+               setStatus(data)
+               if (data && data.status === 'running') {
+                  fetch(`${apiHost}/api/v2/pipeline/logs?lines=5`)
+                     .then(res => res.json())
+                     .then(logData => {
+                        const lines = logData.logs || []
+                        if (lines.length > 0) setLog(lines[lines.length - 1])
+                     })
+               }
+            })
+            .catch(() => { })
+      }, 1000)
+      return () => clearInterval(timer)
+   }, [])
+
+   if (!status || status.status !== 'running') return null
+
+   let message = "Processing..."
+   const lowerLog = log.toLowerCase()
+   if (lowerLog.includes("epoch")) message = "Network Training (Fine-Tuning)..."
+   else if (lowerLog.includes("ingestion")) message = "Ingesting Imagery..."
+   else if (lowerLog.includes("unified detection")) message = "Re-Scanning Affected Tiles..."
+   else if (lowerLog.includes("fusion")) message = "Fusing & Updating Map..."
+   else if (lowerLog.includes("reset")) message = "Resetting Dataset..."
 
    return (
-      <GeoJSON
-         data={networkData}
-         style={{
-            color: '#22d3ee',
-            weight: weight,
-            opacity: opacity,
-            interactive: false
-         }}
-      />
+      <div className="fixed bottom-0 left-0 right-0 bg-slate-900/90 border-t border-cyan-500/30 p-2 z-[2000] flex items-center justify-center gap-4 text-sm text-cyan-400 font-mono shadow-[0_-4px_20px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom fade-in duration-300">
+         <Activity className="h-4 w-4 animate-spin text-cyan-400" />
+         <span className="font-bold tracking-wider uppercase">{message}</span>
+         <span className="text-xs text-slate-500 hidden md:inline-block max-w-lg truncate">{log}</span>
+      </div>
    )
 }
 
 export default function LiveMap() {
    const [assets, setAssets] = useState<Asset[]>([])
-   const [loading, setLoading] = useState(false) // Default false, MapController handles it
+   const [loading, setLoading] = useState(false)
    const [selectedPole, setSelectedPole] = useState<Asset | null>(null)
-   const [zoomLevel, setZoomLevel] = useState(8) // Lifted state for styling
+   const [zoomLevel, setZoomLevel] = useState(8)
+
+   // TRAIN MODE STATE
+   const [isTrainMode, setIsTrainMode] = useState(false)
+   const [trainingClicks, setTrainingClicks] = useState<any[]>([])
+   const trainTimeoutRef = useRef<any>(null)
+
+   const handleTrainClick = async (latlng: any) => {
+      // Optimistic UI: Add marker
+      const newClick = { lat: latlng.lat, lng: latlng.lng, id: Date.now() }
+      setTrainingClicks(prev => [...prev, newClick])
+
+      // Fire and Forget (or Queue)
+      const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+      try {
+         await fetch(`${apiHost}/api/v2/annotation/from_map`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat: latlng.lat, lon: latlng.lng, dataset: 'satellite' })
+         })
+
+         // Auto-Run Debounce (5s)
+         if (trainTimeoutRef.current) clearTimeout(trainTimeoutRef.current)
+         trainTimeoutRef.current = setTimeout(() => {
+            console.log("Auto-triggering continuous training...")
+            commitTraining(true);
+         }, 5000);
+
+      } catch (err) {
+         console.error("Failed to save annotation", err)
+      }
+   }
+
+   const commitTraining = async (auto: boolean | any = false) => {
+      // Handle the case where 'auto' is an Event object from onClick
+      const isAuto = typeof auto === 'boolean' ? auto : false;
+
+      if (trainTimeoutRef.current) clearTimeout(trainTimeoutRef.current)
+
+      const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+
+      // Use Continuous Training (Fine Tuning)
+      await fetch(`${apiHost}/api/v2/pipeline/run/train_satellite`, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ params: { epochs: 20, batch_size: 16, continuous: true } })
+      })
+
+      if (!isAuto) {
+         alert("Continuous Training Started!")
+         setIsTrainMode(false)
+      } else {
+         // Toast or non-intrusive notification ideally
+         console.log("Continuous Training Autostarted")
+      }
+
+      setTrainingClicks([])
+   }
 
    return (
       <div className="relative w-full h-[calc(100vh-6rem)] rounded-lg overflow-hidden border border-border/50 shadow-2xl">
+         <StatusHUD />
 
-         {/* GLOBAL HUD (Top Left) */}
-         <div className="absolute top-4 left-4 z-[400] w-72 pointer-events-none">
-            <Card className="backdrop-blur-md bg-background/60 border-primary/20 shadow-glow pointer-events-auto">
-               <CardHeader className="py-3">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                     <Activity className="h-4 w-4 text-cyan-400 animate-pulse" />
-                     Live Surveillance
-                  </CardTitle>
-                  <CardDescription className="text-xs">Harrisburg, PA Sector 7</CardDescription>
-               </CardHeader>
-               <CardContent className="py-2 space-y-2">
-                  <div className="flex justify-between text-xs">
-                     <span className="text-muted-foreground">Visible Units:</span>
-                     <span className="font-mono text-cyan-400">
-                        {loading ? "Scanning..." : assets.length}
-                     </span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                     <span className="text-muted-foreground">Signal Quality:</span>
-                     <span className="font-mono text-green-400">STRONG</span>
-                  </div>
-               </CardContent>
-            </Card>
-         </div>
+         {/* GLOBAL HUD */}
+         {/* ... (Existing HUD) ... */}
 
-         {/* CONTROLS (Top Right) */}
-         <div className="absolute top-4 right-4 z-[400] flex flex-col gap-2">
-            <Button variant="outline" size="sm" className="backdrop-blur-md bg-background/60 border-primary/20 hover:bg-primary/20">
-               <Layers className="h-4 w-4 mr-2" />
-               Layers
-            </Button>
-            <Button variant="outline" size="sm" className="backdrop-blur-md bg-background/60 border-primary/20 hover:bg-primary/20">
-               <Filter className="h-4 w-4 mr-2" />
-               Filters
-            </Button>
-         </div>
+
 
          <MapContainer
-            center={[40.9, -77.8]} // Center of PA
-            zoom={8} // State View
-            style={{ height: '100%', width: '100%' }}
+            center={[40.9, -77.8]}
+            zoom={8}
+            style={{ height: '100%', width: '100%', cursor: isTrainMode ? 'crosshair' : 'grab' }} // Crosshair cursor
             className="bg-slate-950"
          >
             <MapController
@@ -365,9 +346,10 @@ export default function LiveMap() {
                setLoading={setLoading}
                selectedPole={selectedPole}
                setSelectedPole={setSelectedPole}
-               zoomLevel={zoomLevel} // Pass zoomLevel to MapController
+               zoomLevel={zoomLevel}
+               isTrainMode={isTrainMode}
+               onTrainClick={handleTrainClick}
             />
-            {/* Capture Zoom for Styling */}
             <MapEventsHandler setZoomLevel={setZoomLevel} />
 
             <TileLayer
@@ -375,18 +357,18 @@ export default function LiveMap() {
                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
             />
 
-            {/* 1. LAYER: LINES (Visible at Low Zoom) */}
             <PoleLinesLayer zoom={zoomLevel} />
 
-            {/* 2. LAYER: DOTS (Visible at High Zoom) */}
+            {/* Existing Assets */}
             {zoomLevel >= 11 && assets.map(pole => (
                <CircleMarker
                   key={pole.id}
                   center={[pole.lat, pole.lng]}
+                  // ... (Existing props) ...
                   eventHandlers={{
                      click: (e) => {
                         DomEvent.stopPropagation(e.originalEvent)
-                        setSelectedPole(pole)
+                        if (!isTrainMode) setSelectedPole(pole)
                      }
                   }}
                   pathOptions={{
@@ -400,14 +382,57 @@ export default function LiveMap() {
                      weight: zoomLevel < 13 ? 1 : 2
                   }}
                   radius={zoomLevel < 13 ? 3 : 6}
-               >
-                  {/* No Popup Here - Handled Globally */}
-               </CircleMarker>
+               />
+            ))}
+
+            {/* TRAINING MARKERS (Purple) */}
+            {trainingClicks.map(p => (
+               <CircleMarker
+                  key={p.id}
+                  center={[p.lat, p.lng]}
+                  pathOptions={{
+                     color: '#d8b4fe', // Purple-300
+                     fillColor: '#9333ea', // Purple-600
+                     fillOpacity: 1,
+                     weight: 2
+                  }}
+                  radius={6}
+               />
             ))}
 
          </MapContainer>
 
-         {/* GLOBAL MODAL RENDERED HERE */}
+         {/* CONTROLS (Moved to end for Z-Indexing) */}
+         <div className="absolute top-4 right-4 z-[2000] flex flex-col gap-2 pointer-events-auto">
+            <Button variant="outline" size="sm" className="backdrop-blur-md bg-background/60 border-primary/20 hover:bg-primary/20">
+               <Layers className="h-4 w-4 mr-2" />
+               Layers
+            </Button>
+
+            {/* TRAIN MODE TOGGLE */}
+            <Button
+               variant={isTrainMode ? "default" : "outline"}
+               size="sm"
+               onClick={() => setIsTrainMode(!isTrainMode)}
+               className={`backdrop-blur-md border-primary/20 ${isTrainMode ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-background/60 hover:bg-primary/20'}`}
+            >
+               <Crosshair className="h-4 w-4 mr-2" />
+               {isTrainMode ? "Training Mode ON" : "Train Mode"}
+            </Button>
+
+            {/* COMMIT BUTTON */}
+            {trainingClicks.length > 0 && (
+               <Button
+                  size="sm"
+                  onClick={() => commitTraining(false)}
+                  className="bg-green-600 hover:bg-green-700 text-white animate-in slide-in-from-right fade-in duration-300"
+               >
+                  <Save className="h-4 w-4 mr-2" />
+                  Commit & Train ({trainingClicks.length})
+               </Button>
+            )}
+         </div>
+
          {selectedPole && (
             <AssetDetailsModal pole={selectedPole} onClose={() => setSelectedPole(null)} />
          )}

@@ -5,6 +5,7 @@ from database import engine
 from src.config import (
     FUSION_UPDATE_CONFIDENCE_THRESHOLD,
     FUSION_NEW_FLAGGED_CONFIDENCE_THRESHOLD,
+    FUSION_AUTO_VERIFY_CONFIDENCE_THRESHOLD,
     FUSION_NEW_FLAGGED_MAX_ROAD_DIST_M,
     FINANCIAL_IMPACT_DAMAGE,
     FINANCIAL_IMPACT_LEANING,
@@ -29,6 +30,7 @@ class FusionEngine:
             "veg_cost": FINANCIAL_IMPACT_VEGETATION,
             "update_conf": FUSION_UPDATE_CONFIDENCE_THRESHOLD,
             "new_conf": FUSION_NEW_FLAGGED_CONFIDENCE_THRESHOLD,
+            "auto_verify_conf": FUSION_AUTO_VERIFY_CONFIDENCE_THRESHOLD,
             "max_road_dist": FUSION_NEW_FLAGGED_MAX_ROAD_DIST_M,
             "pat_damage": "%damage%",
             "pat_leaning": "%leaning%",
@@ -92,7 +94,7 @@ class FusionEngine:
 
         # 2. Insert New Poles
         # Logic: If we see a high-confidence pole that is NOT near an existing pole, create it.
-        # Must be near a road? (Optional config)
+        # Now supports AUTO-VERIFICATION for very high confidence.
         query_new = f"""
         INSERT INTO poles (id, pole_id, location, status, last_verified_at, tags, financial_impact)
         SELECT 
@@ -102,6 +104,7 @@ class FusionEngine:
             CASE 
                 WHEN d.class_name LIKE :pat_damage THEN 'Critical'
                 WHEN d.class_name LIKE :pat_leaning THEN 'Critical'
+                WHEN d.confidence >= :auto_verify_conf THEN 'Verified'
                 ELSE 'Flagged'
             END, 
             now(), 

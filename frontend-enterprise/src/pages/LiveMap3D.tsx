@@ -5,7 +5,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { Card } from "@/components/ui/card"
 import { Button } from '@/components/ui/button'
 import { Badge } from "@/components/ui/badge"
-import { Activity, ExternalLink, Map as MapIcon, Layers } from "lucide-react"
+import { Activity, ExternalLink, Map as MapIcon, Layers, Crosshair, Save } from "lucide-react"
 
 interface Asset {
     id: string
@@ -28,6 +28,54 @@ interface Asset {
 //     const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
 //     return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
 // };
+
+const StatusHUD = ({ onComplete }: { onComplete?: () => void }) => {
+    const [status, setStatus] = useState<any>(null)
+    const [log, setLog] = useState<string>("")
+    const wasRunningRef = useRef(false)
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+            fetch(`${apiHost}/api/v2/pipeline/status`).then(res => res.json()).then(data => {
+                setStatus(data)
+
+                const isRunning = data && data.status === 'running'
+
+                // Trigger auto-refresh when job finishes
+                if (wasRunningRef.current && !isRunning && onComplete) {
+                    onComplete()
+                }
+                wasRunningRef.current = isRunning
+
+                if (isRunning) {
+                    fetch(`${apiHost}/api/v2/pipeline/logs?lines=5`).then(res => res.json()).then(l => {
+                        const lines = l.logs || []
+                        if (lines.length > 0) setLog(lines[lines.length - 1])
+                    })
+                }
+            }).catch(() => { })
+        }, 1000)
+        return () => clearInterval(timer)
+    }, [onComplete])
+    if (!status || status.status !== 'running') return null
+    let message = "Processing..."
+    const lowerLog = log.toLowerCase()
+    if (lowerLog.includes("epoch")) message = "Network Training (Fine-Tuning)..."
+    else if (lowerLog.includes("ingestion")) message = "Ingesting Imagery..."
+    else if (lowerLog.includes("unified detection")) message = "Re-Scanning Affected Tiles..."
+    else if (lowerLog.includes("fusion")) message = "Fusing & Updating Map..."
+    else if (lowerLog.includes("reset")) message = "Resetting Dataset..."
+    return (
+        <div className="fixed bottom-0 left-0 right-0 bg-slate-900/90 border-t border-cyan-500/30 p-2 z-[2000] flex items-center justify-center gap-4 text-sm text-cyan-400 font-mono shadow-[0_-4px_20px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom fade-in duration-300">
+            <Activity className="h-4 w-4 animate-spin text-cyan-400" />
+            <span className="font-bold tracking-wider uppercase">{message}</span>
+            {log && log.length > 5 && (
+                <span className="text-xs text-slate-500 hidden md:inline-block max-w-lg truncate border-l border-slate-700 pl-3 ml-3">{log}</span>
+            )}
+        </div>
+    )
+}
 
 // Helper: Static Map for Thumbnails
 const getStaticMapUrl = (lat: number, lng: number, width: number, height: number) => {
@@ -176,6 +224,50 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
     useEffect(() => { void assets }, [assets]) // Dummy usageState(true)
     const [isRotating, setIsRotating] = useState(true)
 
+    // TRAIN MODE STATE
+    const [isTrainMode, setIsTrainMode] = useState(false)
+    const isTrainModeRef = useRef(false)
+    const [trainingClicks, setTrainingClicks] = useState<any[]>([])
+    const trainTimeoutRef = useRef<any>(null)
+    useEffect(() => { isTrainModeRef.current = isTrainMode }, [isTrainMode])
+
+    // Auto-Pause Rotation same time as Cursor Change
+    useEffect(() => {
+        setIsRotating(!isTrainMode)
+        if (map.current) {
+            map.current.getCanvas().style.cursor = isTrainMode ? 'crosshair' : ''
+        }
+    }, [isTrainMode])
+
+    const commitTraining = async (auto = false) => {
+        if (trainTimeoutRef.current) clearTimeout(trainTimeoutRef.current)
+        const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+        await fetch(`${apiHost}/api/v2/pipeline/run/train_satellite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ params: { epochs: 20, batch_size: 16, continuous: true } })
+        })
+        if (!auto) { alert("Continuous Training Started!") } else { console.log("Auto-Training Started") }
+        setTrainingClicks([])
+        setIsTrainMode(false)
+    }
+
+    // Auto-Train Watcher
+    useEffect(() => {
+        if (trainingClicks.length === 0) return
+        if (trainTimeoutRef.current) clearTimeout(trainTimeoutRef.current)
+        trainTimeoutRef.current = setTimeout(() => { commitTraining(true) }, 5000)
+    }, [trainingClicks])
+
+    // Sync Map Source
+    useEffect(() => {
+        if (!map.current || !map.current.getSource('training-points')) return
+        (map.current.getSource('training-points') as maplibregl.GeoJSONSource).setData({
+            type: 'FeatureCollection',
+            features: trainingClicks.map(p => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] }, properties: {} }))
+        } as any)
+    }, [trainingClicks])
+
     // Sync state to ref
     useEffect(() => { isRotatingRef.current = isRotating }, [isRotating])
 
@@ -200,7 +292,7 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
             isRotatingRef.current = false; setIsRotating(false)
             map.current.addSource('terrain-source', { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], encoding: 'terrarium', tileSize: 256, maxzoom: 12 })
             map.current.addSource('assets', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-            map.current.addLayer({ id: 'assets-glow', type: 'circle', source: 'assets', minzoom: 12, paint: { 'circle-radius': 12, 'circle-color': ['match', ['get', 'status'], 'Verified', '#22c55e', 'Moved', '#f97316', 'New', '#06b6d4', 'Review', '#f59e0b', '#ef4444'], 'circle-opacity': 0.2, 'circle-blur': 0.8 } })
+            map.current.addLayer({ id: 'assets-glow', type: 'circle', source: 'assets', paint: { 'circle-radius': 12, 'circle-color': ['match', ['get', 'status'], 'Verified', '#22c55e', 'Moved', '#f97316', 'New', '#06b6d4', 'Review', '#f59e0b', '#ef4444'], 'circle-opacity': 0.2, 'circle-blur': 0.8 } })
 
             // Context
             try {
@@ -209,8 +301,28 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                 map.current?.addLayer({ id: 'counties-line', type: 'line', source: 'counties', paint: { 'line-color': '#22d3ee', 'line-width': 1, 'line-opacity': 0.3 } })
                 const nData = await fetch('/pole_network_v2.geojson').then(r => r.json())
                 map.current?.addSource('network', { type: 'geojson', data: nData })
-                map.current?.addLayer({ id: 'network-line', type: 'line', source: 'network', paint: { 'line-color': '#22d3ee', 'line-width': 3, 'line-opacity': 0.6 } }, 'assets-glow')
-            } catch (e) { }
+                map.current?.addLayer({ id: 'network-line', type: 'line', source: 'network', paint: { 'line-color': '#22d3ee', 'line-width': 3, 'line-opacity': 0.6 } })
+
+                // Training Layer
+                if (!map.current.getSource('training-points')) {
+                    map.current.addSource('training-points', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+                    map.current.addLayer({ id: 'training-points-circle', type: 'circle', source: 'training-points', paint: { 'circle-radius': 6, 'circle-color': '#9333ea', 'circle-stroke-width': 2, 'circle-stroke-color': '#d8b4fe' } })
+                }
+
+                // Click Handler
+                map.current?.on('click', (e) => {
+                    if (isTrainModeRef.current) {
+                        const newClick = { lat: e.lngLat.lat, lng: e.lngLat.lng, id: Date.now() }
+                        setTrainingClicks(prev => [...prev, newClick])
+                        const apiHost = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
+                        fetch(`${apiHost}/api/v2/annotation/from_map`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lat: e.lngLat.lat, lon: e.lngLat.lng, dataset: 'satellite' })
+                        }).catch(console.error)
+                    }
+                })
+            } catch (e) { console.error("Map Init Failed:", e) }
 
             // Landing
             const TARGET_LAT = 40.19; const TARGET_LNG = -76.73
@@ -359,7 +471,27 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
 
     return (
         <div className={`relative w-full rounded-lg overflow-hidden border border-white/10 shadow-2xl bg-black ${mode === 'widget' ? 'h-full min-h-[400px]' : 'h-[calc(100vh-6rem)]'}`}>
-            <div ref={mapContainer} className="w-full h-full" />
+            <StatusHUD />
+            {/* CONTROLS */}
+            <div className="absolute top-4 right-4 z-[2000] flex flex-col gap-2 pointer-events-auto">
+                <Button
+                    variant={isTrainMode ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setIsTrainMode(!isTrainMode)}
+                    className={`backdrop-blur-md border-primary/20 ${isTrainMode ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-background/60 hover:bg-primary/20'}`}
+                >
+                    <Crosshair className="h-4 w-4 mr-2" />
+                    {isTrainMode ? "Training Mode ON" : "Train Mode"}
+                </Button>
+                {trainingClicks.length > 0 && (
+                    <Button size="sm" onClick={() => commitTraining(false)} className="bg-green-600 hover:bg-green-700 text-white animate-in slide-in-from-right fade-in duration-300">
+                        <Save className="h-4 w-4 mr-2" />
+                        Commit ({trainingClicks.length})
+                    </Button>
+                )}
+            </div>
+
+            <div ref={mapContainer} className={`w-full h-full ${isTrainMode ? 'cursor-crosshair' : ''}`} />
 
             {/* INSPECTOR MODAL + SLIDE-OUT WITH CENTERED ALIGNMENT */}
             {expandedPole && (
@@ -504,9 +636,16 @@ export default function LiveMap3D({ mode = 'full' }: { mode?: 'full' | 'widget' 
                 </div>
             )}
 
+            {/* UI OVERLAYS */}
+            <div className="fixed inset-x-0 bottom-0 pointer-events-none z-[1900]">
+                {/* This wrapper ensures HUD is above map but lets map be clicked */}
+                <div className="pointer-events-auto">
+                    <StatusHUD onComplete={() => fetchAssets(null)} />
+                </div>
+            </div>
+
             {mode === 'full' && (
                 <div className="absolute bottom-8 left-8 flex gap-2 z-10 items-center">
-                    {/* Region Selector */}
                     {availableRegions.length > 0 && (
                         <div className="relative group">
                             <div className="flex items-center gap-2 px-3 py-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-md text-white/80 hover:bg-black/80 hover:text-white transition-all cursor-pointer">
