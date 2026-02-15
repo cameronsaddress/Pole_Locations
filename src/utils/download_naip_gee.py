@@ -80,7 +80,7 @@ def download_real_naip_imagery():
     try:
         # Initialize Earth Engine (now authenticated)
         logger.info("Initializing Google Earth Engine...")
-        ee.Initialize(project='ee-cameronanderson')  # Use authenticated project
+        ee.Initialize(project=os.getenv('GEE_PROJECT', 'your-gee-project'))  # Set via GEE_PROJECT env var
         logger.info("✓ Successfully authenticated!")
 
         poles_csv = RAW_DATA_DIR / 'osm_poles_harrisburg_real.csv'

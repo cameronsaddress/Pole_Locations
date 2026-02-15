@@ -36,7 +36,7 @@ If Earth Engine fails, download directly:
 1. **Visit:** https://nrcs.app.box.com/v/naip
 2. **Navigate to:** `pa` folder → `2021` folder
 3. **Download:** Any `.tif` files (each is ~14MB, covers ~3.75 x 3.75 miles)
-4. **Save to:** `/Users/cameronanderson/PoleLocations/data/imagery/`
+4. **Save to:** `./PoleLocations/data/imagery/`
 5. Download 2-3 files to cover 5 square miles
 
 ### Option 3: USGS EarthExplorer (FREE SIGNUP)
@@ -49,7 +49,7 @@ If Earth Engine fails, download directly:
    - Choose year 2021 or 2020
 4. **Select tiles** covering ~5 square miles
 5. **Download:** GeoTIFF format
-6. **Place in:** `/Users/cameronanderson/PoleLocations/data/imagery/`
+6. **Place in:** `./PoleLocations/data/imagery/`
 
 ## What Happens After We Get Real Imagery
 

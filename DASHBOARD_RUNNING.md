@@ -104,7 +104,7 @@ The backend failed because it's not using the venv. Here's the fix:
 ### **Option 1: Manual Start (Recommended)**
 ```bash
 # Open a new terminal
-cd /Users/cameronanderson/PoleLocations
+cd ./PoleLocations
 source venv/bin/activate
 cd backend
 python3 -m app.main

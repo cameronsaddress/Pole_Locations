@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-LOG_DIR="/Users/cameronanderson/PoleLocations/logs"
-PILOT_LOG="/Users/cameronanderson/PoleLocations/run_pilot.log"
+LOG_DIR="$(dirname "$0")/logs"
+PILOT_LOG="$(dirname "$0")/run_pilot.log"
 
 mkdir -p "$LOG_DIR"
 touch "$PILOT_LOG"

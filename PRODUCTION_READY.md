@@ -307,7 +307,7 @@ streamlit run dashboard/app.py
 - [REAL_DATA_STATUS.md](REAL_DATA_STATUS.md) - Data sources
 
 ### Code Repository
-- **Location:** `/Users/cameronanderson/PoleLocations`
+- **Location:** `./PoleLocations`
 - **Model:** `models/pole_detector_real.pt`
 - **Pipeline:** `src/` directory
 - **Dashboard:** `dashboard/app.py`

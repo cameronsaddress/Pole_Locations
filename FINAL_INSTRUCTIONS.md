@@ -26,7 +26,7 @@
 
 ### **Terminal 1: Start Backend**
 ```bash
-cd /Users/cameronanderson/PoleLocations
+cd ./PoleLocations
 source venv/bin/activate
 cd backend
 uvicorn app.main:app --host 0.0.0.0 --port 8021 --reload
@@ -34,7 +34,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8021 --reload
 
 ### **Terminal 2: Start Frontend**
 ```bash
-cd /Users/cameronanderson/PoleLocations/frontend
+cd ./PoleLocations/frontend
 npm run dev
 ```
 

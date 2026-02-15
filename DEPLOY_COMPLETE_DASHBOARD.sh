@@ -7,7 +7,7 @@ echo "🚀 Deploying Complete Enterprise Dashboard"
 echo "=========================================="
 echo ""
 
-cd /Users/cameronanderson/PoleLocations/frontend
+cd $(dirname "$0")/frontend
 
 # Create directories
 mkdir -p src/pages src/components

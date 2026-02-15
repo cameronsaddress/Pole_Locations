@@ -6,7 +6,7 @@ echo "=========================================="
 # Step 1: Update Dashboard to use professional, easy-to-read colors
 echo "📊 Updating Dashboard with professional color scheme..."
 
-cat > /Users/cameronanderson/PoleLocations/frontend/src/pages/Dashboard.tsx << 'DASHBOARD_EOF'
+cat > $(dirname "$0")/frontend/src/pages/Dashboard.tsx << 'DASHBOARD_EOF'
 import { useState, useEffect } from 'react'
 
 interface MetricsSummary {
@@ -298,7 +298,7 @@ DASHBOARD_EOF
 # Step 2: Update poles API to serve any available image or generate placeholder
 echo "🖼️  Updating poles API to handle image requests better..."
 
-cat > /Users/cameronanderson/PoleLocations/backend/app/api/v1/poles.py << 'POLES_API_EOF'
+cat > $(dirname "$0")/backend/app/api/v1/poles.py << 'POLES_API_EOF'
 """
 Poles API endpoints
 """
@@ -466,5 +466,5 @@ echo "🖼️  Backend will serve sample pole images!"
 echo ""
 DASHBOARD_EOF
 
-chmod +x /Users/cameronanderson/PoleLocations/FIX_DASHBOARD_COLORS_AND_IMAGES.sh
-/Users/cameronanderson/PoleLocations/FIX_DASHBOARD_COLORS_AND_IMAGES.sh
+chmod +x $(dirname "$0")/FIX_DASHBOARD_COLORS_AND_IMAGES.sh
+$(dirname "$0")/FIX_DASHBOARD_COLORS_AND_IMAGES.sh

@@ -30,7 +30,7 @@ We have successfully delivered a **fully functional AI-powered pole verification
 
 ### 1. Complete Software System ✅
 
-**Location:** `/Users/cameronanderson/PoleLocations/`
+**Location:** `./PoleLocations/`
 
 #### Core Components
 
