@@ -1,4 +1,0 @@
-/data/imagery/naip_multi_county/dauphin_pa/pa_m_3907604_ne_18_060_20220711.tif
-/data/imagery/naip_multi_county/york_pa/md_m_3907622_nw_18_030_20230527_20231018.tif
-/data/imagery/naip_multi_county/york_pa/md_m_3907622_sw_18_030_20230527_20231018.tif
-/data/imagery/naip_multi_county/new_york_state/schuyler/ny_m_4207748_ne_18_060_20221103.tif

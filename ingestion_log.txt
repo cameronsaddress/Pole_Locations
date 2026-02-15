@@ -1,2 +1,0 @@
-nohup: ignoring input
-ERROR:MapillaryIngest:MAPILLARY_TOKEN not found in env!
